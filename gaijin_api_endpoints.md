@@ -2,7 +2,11 @@
 ## Char server endpoints  
 - These endpoints all have their root as a char server (example: https://char-lw-nl-005-5.warthunder.com/char)  
 - The titles of the sections are to be used as an `action` header value to get the desired data  
+- Every `POST` request must have a `token` header given for authentication  
 ### cln_get_users_terse_info  
+- `POST` request  
+- Headers  
+	- `usersList` (user IDs separated by ';')  
 ### cln_bulk_set_gblk  
 ### cln_ww_global_status_short  
 ### cln_get_leaderboard_json  
@@ -37,6 +41,67 @@
 ### cln_recycle_items  
 ### cln_inventory_purchase_item  
 ### cln_apply_spare_item  
+### ano_clan_accept_membership_request  
+- `POST` request  
+- Headers  
+	- `userid` (Kicked user)  
+	- `uidHint` (Applying user)  
+	- `gameVersion`  
+- Request form  
+	- BLK  
+- Response form  
+	- "!OK"  
+### ano_clan_dismiss_member  
+- `POST` request  
+- Headers  
+	- `userid` (Kicked user)  
+	- `uidHint` (Kicking officer)  
+	- `gameVersion`  
+- Request form  
+	- HEX  
+- Response form  
+	- "!OK"  
+### cln_clan_membership_request  
+- `POST` request  
+- Headers  
+	- `userid` (Applying user)  
+	- `gameVersion`  
+- Request form  
+	- HEX  
+- Response form  
+	- "!OK"  
+### cln_get_initial_meta  
+- `POST` request  
+- Header  
+	- `uidHint` (Account UID)  
+### cln_get_price_ex  
+- `POST` request  
+- Header  
+	- `uidHint` (Account UID)  
+### cln_set_general_blk  
+- `POST` request  
+- Header  
+	- `uidHint` (Account UID)  
+	- `appId` (Game ID, WT is 1067)  
+### cln_get_ugc_items_info  
+### cln_accept_eula  
+- `POST` request  
+- Header  
+	- `uidHint` (Account UID)  
+	- `returnOnlyEULA`  
+### cln_require_unlock  
+- `POST` request  
+- Header  
+	- `uidHint` (Account UID)  
+### cln_set_starting_info  
+- `POST` request  
+- Header  
+	- `uidHint` (Account UID)  
+### cln_get_meta_blk  
+- `POST` request  
+- Header  
+	- `uidHint` (Account UID)  
+	- `appId` (Game ID, WT is 1067)  
 ## Contact proxy endpoints  
 - Same as before (example: https://contact-proxy-02.gaijin.net/json)  
 ### cln_get_allowed_to_be_added_to_contacts  
@@ -44,6 +109,12 @@
 - Returns JSON  
 - Request form: `Not needed`  
 - Response form:  
+	```json  
+	{  
+		"ata": true  
+	}  
+	```  
+	- No clue what this is meant to say  
 ### GetContacts  
 - `POST` request  
 - Returns JSON  
@@ -74,14 +145,63 @@
 			],  
 			"myRequests": [...],  
 			"rejectedByMe": [...],  
+			"myBlacklist": [...]  
 		}  
 	}  
 	```  
 ### cln_cs_login  
+- `POST` Request  
+- Returns JSON  
+- Request body:  
+	```json  
+	{  
+		"game":"wt"  
+	}  
+	```  
+	- Sure i guess?  
+- Response body:  
+	```json  
+	{  
+		"chardToken": Some kind of token,  
+		"user_id": user's ID,  
+		"nick": "nickname",  
+		"login": {  
+			"first": UNIX timestamp,  
+			"last": UNIX timestamp,  
+		}  
+	}  
+	```  
 ## Inventory proxy endpoints  
 - Same as before (example: https://inventory-proxy-01.gaijin.net/char)  
 ### GetItemDefsClient  
 ### GetInventory  
+- `POST` request  
+- Headers  
+	- `uidHint` (User ID of person to check)  
+	- `appid` (for WT it's `1067`)  
+- Response form example  
+	```json  
+	{  
+		"response": {  
+			"item_json": [  
+				{  
+						"accountid": "126390297",  
+						"appid": 1067,  
+						"craftedFrom": "",  
+						"expireAt": "",  
+						"itemdef": 299004,  
+						"itemid": "7059552941",  
+						"origin": "external",  
+						"quantity": 2,  
+						"seenByPlayer": false,  
+						"state": "none",  
+						"timestamp": "2026-04-29T19:43:10.7254004Z",  
+						"tradable_after_timestamp": "0"  
+					},  
+			]  
+		}  
+	}  
+	```  
 ### GetItemPrices  
 ### ExchangeItems  
 ## User stat proxy endpoints  
