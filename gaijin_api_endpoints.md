@@ -161,9 +161,6 @@
 			- `wt_quiz_success` (no clue)  
 			- `infantry_cbt_requester` (probably a temporary flag, requested Infantry CBT participation)  
 			- `lang_*` (computer locale on account creation?)  
-			- ``  
-			- ``  
-			- ``  
 - Can extend token lifetime by calling the URL but with the following data:  
 	```json  
 	{  
