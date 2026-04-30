@@ -1,4 +1,7 @@
 # Gaijin's endpoints used ingame  
+Many of the shown 'endpoints' are actually just requests to the given server, with a specific `action` header set  
+This isn't an exhaustive list, these are just all I could find through inspecting HTTP traffic  
+Not all endpoints shall be documented, as it would take forever to decode and document every single endpoint (and some of them are outright impossible to replicate, like `cln_accept_eula`)  
 ## Char server endpoints  
 - These endpoints all have their root as a char server (example: https://char-lw-nl-005-5.warthunder.com/char)  
 - The titles of the sections are to be used as an `action` header value to get the desired data  
@@ -102,6 +105,37 @@
 - Header  
 	- `uidHint` (Account UID)  
 	- `appId` (Game ID, WT is 1067)  
+### noa_bigquery_client_noauth  
+### cln_get_binary_diff  
+### cln_get_news_ex  
+### ano_get_external_ids  
+- `POST` request  
+- Header  
+	- `uidHint` (Self ID)  
+	- `userid` (Lookup ID)  
+### ano_get_wishlist_json  
+- `POST` request  
+- Header  
+	- `uidHint` (Self ID)  
+	- `userid` (Lookup ID)  
+- Response form example  
+	```json  
+	{  
+		"userId": 77753776,  
+		"units": [  
+			{  
+			"unit": "us_xm1_gm",  
+			"comment": "low tier abrooms",  
+			"time": 1755869479  
+			},  
+			{  
+			"unit": "us_xm1_chrysler",  
+			"comment": "sadge, will never get due to console politics",  
+			"time": 1755869501  
+			}  
+		]  
+	}  
+	```  
 ## Contact proxy endpoints  
 - Same as before (example: https://contact-proxy-02.gaijin.net/json)  
 ### cln_get_allowed_to_be_added_to_contacts  
@@ -174,6 +208,82 @@
 ## Inventory proxy endpoints  
 - Same as before (example: https://inventory-proxy-01.gaijin.net/char)  
 ### GetItemDefsClient  
+- `POST` request  
+- Header  
+	- `uidHint` (Self ID)  
+	- `appId` (game ID, WT's is `1067`)  
+- Response form example  
+	```json  
+	{  
+		"response": {  
+			"timestamp": 1777580655,  
+			"itemdef_json": [  
+				{  
+					"Timestamp": "2022-07-22T10:05:55.0632171Z",  
+					"alwaysPresent": false,  
+					"auctionable": false,  
+					"background_color": "",  
+					"bundle": "2752032",  
+					"deprecated": false,  
+					"exchange": "2752030,2000000x3",  
+					"expireAt": "",  
+					"granted_by_purch": "",  
+					"hidden": false,  
+					"icon_url": "",  
+					"icon_url_large": "",  
+					"item_quality": 0,  
+					"itemdefid": 2752031,  
+					"lifetime": "1m",  
+					"lifetime_modifier": "",  
+					"limitOnPurchase": 0,  
+					"market_hash_name": "",  
+					"marketable": false,  
+					"meta": "",  
+					"name": "Sensors (unexamined working) 2752030 - Examine Process",  
+					"name_color": "",  
+					"premium": "",  
+					"required_items": "",  
+					"steam_itemdefid": 0,  
+					"tags": "type:craft_process;isDisassemble:true;customLocalizationPreset:itemExamination",  
+					"tradable_delay_sec": 0,  
+					"type": "delayedexchange"  
+				},  
+				{  
+					"Timestamp": "2022-07-22T10:05:55.0632171Z",  
+					"alwaysPresent": false,  
+					"auctionable": false,  
+					"background_color": "",  
+					"deprecated": false,  
+					"description": "This item is unexamined. You need to examine it in order to understand whether it is defective or not.",  
+					"exchange": "",  
+					"expireAt": "2019-04-29T11:00:00Z",  
+					"granted_by_purch": "",  
+					"hidden": false,  
+					"icon_url": "https://static-ggc.gaijin.net/events/craft_i180/craft_i180_left_aileron.png",  
+					"icon_url_large": "https://static-ggc.gaijin.net/events/craft_i180/craft_i180_left_aileron.png",  
+					"item_quality": 1,  
+					"itemdefid": 2531430,  
+					"lifetime": "",  
+					"lifetime_modifier": "",  
+					"limitOnPurchase": 0,  
+					"market_hash_name": "",  
+					"marketable": false,  
+					"meta": "",  
+					"name": "Left aileron",  
+					"name_color": "AFAFA1",  
+					"premium": "",  
+					"required_items": "",  
+					"steam_itemdefid": 0,  
+					"tags": "type:craft_part;canBeDisassembled:mainAction;markingPreset:unexaminedItem;customLocalizationPreset:itemExamination;alwaysKnownItem:true;quality:common",  
+					"tradable_delay_sec": 0,  
+					"type": "item",  
+					"used_to_create": "2531431"  
+				},  
+				{...}  
+			]  
+		}  
+	}  
+	```  
 ### GetInventory  
 - `POST` request  
 - Headers  
@@ -203,16 +313,121 @@
 	}  
 	```  
 ### GetItemPrices  
+- `POST` request  
+- Header  
+	- `currency` (I had the value "WTS" when checking)  
+	- `uidHint` (Self ID)  
+- Response form  
+	```json  
+	{  
+		"response": {  
+			"itemPrices": [  
+				{  
+					"itemdefid": 216013,  
+					"price": 50000  
+				},  
+				{  
+					"itemdefid": 216019,  
+					"price": 10000  
+				},  
+				{...}  
+			]  
+		}  
+	}  
+	```  
 ### ExchangeItems  
 ## User stat proxy endpoints  
 - Same as before (example: https://userstat-proxy-01.gaijin.net/char)  
 ### GetUnlocks  
 ### GetStats  
 ### GetUserStatDescList  
+## UGC Info proxy endpoints  
+- Same as before (example: https://ugcinfo-proxy-01.gaijin.net/char)  
+### cln_get_ugc_items_info  
+- `POST` request  
+- Request form example:  
+	```json  
+	{  
+		"appId": 1067,  
+		"guids": [  
+			"9662f000-5a1e-406b-b033-52c0dfa43067",  
+			"b312f000-5a1e-406b-b033-52c0dfa43067",  
+			"dc62f000-5a1e-406b-b033-52c0dfa43067"  
+		]  
+	}  
+	```  
+	- WT has the appId of `1067`  
+- Response form example:  
+	```json  
+	{  
+		"9662f000-5a1e-406b-b033-52c0dfa43067": {  
+			"provider_id": 997628,  
+			"metaHash": "7sv5lmmpmm2anpb6h7rh4vjl6lykxzol-bwu",  
+			"description_english": "JA37C, 101 squadron \"Johan Röd\", F10 air wing, Ängelholm, 2001\. Was painted in the red scheme to fly in a goodbye ceremony",  
+			"author": 43916192,  
+			"tags": "inGamePreview:yes;semihistorical:yes;eventName:camo_trophy_2_09;authenticity:semihistorical;country:sweden;vehicleType:aircraft;vehicleSubtypes:fighter;quality:junk;type:skin;approved:yes",  
+			"name_english": "JA37C 'The Show Must Go On'",  
+			"icon_url": "https://wt-ugc.cdn.gaijin.net/dc/me/ez735w7myvqyw5iqdmeufxkh4web-bcqv.icon.jpg",  
+			"appId": 1067,  
+			"provider": "live",  
+			"author_name": "StarlightShinin",  
+			"description_russian": "JA37C, 101-я эскадрилья \"Johan Röd\", авиакрыло F10, Энгельхольм, 2001\. Был окрашен в красный цвет для \nцеремонии вывода AJS-37 из состава ВВС Швеции",  
+			"type": "skin",  
+			"meta": "bmFtZTp0PSJ1c2VyIg0KbW9kZWxOYW1lOnQ...",  
+			"link": "https://live.warthunder.com/post/997628/",  
+			"item_quality": 2,  
+			"name_color": "14BD3A",  
+			"name_russian": "JA37C 'The Show Must Go On'",  
+			"background_color": "000000",  
+			"icon_url_large": "https://wt-ugc.cdn.gaijin.net/5o/5w/eywlcndkrqojcxuiq35kmpl7qplx-cjac.icon_large.jpg"  
+		},  
+		"b312f000-5a1e-406b-b033-52c0dfa43067": {  
+			"provider_id": 1090807,  
+			"metaHash": "ibyaykxkwjmntrsxuwotlfbtafgnfdl5-66",  
+			"description_english": "JAS39A 'Prototype 39-2', Aeroseum in Göteborg in February 2023",  
+			"author": 2456465,  
+			"tags": "inGamePreview:yes;historical:yes;eventName:camo_trophy_2_33;authenticity:historical;country:sweden;vehicleType:aircraft;vehicleSubtypes:fighter;type:skin;approved:yes",  
+			"name_english": "JAS39A 'Prototype 39-2'",  
+			"icon_url": "https://wt-ugc.cdn.gaijin.net/3q/z6/6w6xvwxqrlswz5fany2cnwiszc4x-baoh.icon.jpg",  
+			"appId": 1067,  
+			"provider": "live",  
+			"author_name": "Atsuk0",  
+			"description_russian": "JAS39A \"Прототип 39-2\", Музей ВВС Aeroseum в Гетеборге, февраль 2023 года",  
+			"type": "skin",  
+			"meta": "bmFtZTp0PSJ1c2VyIg0KbW9kZWxOYW1lOnQ9InNhYWJfamFzMzl...",  
+			"link": "https://live.warthunder.com/post/1090807/",  
+			"item_quality": 2,  
+			"name_color": "14BD3A",  
+			"name_russian": "JAS39A 'Прототип 39-2'",  
+			"background_color": 0,  
+			"icon_url_large": "https://wt-ugc.cdn.gaijin.net/vx/jx/y7dj2rm3rr2zu4jdkarnu6se7uiy-cemy.icon_large.jpg"  
+		},  
+		"dc62f000-5a1e-406b-b033-52c0dfa43067": {  
+			"provider_id": 937249,  
+			"metaHash": "nheqbp77gsephkb2ew4ht5vn24ltnqgm-bsx",  
+			"description_english": "M60, 33rd Armor Regiment",  
+			"author": 341717,  
+			"tags": "thunderleague:yes;inGamePreview:yes;historical:yes;authenticity:historical;country:usa;vehicleType:tank;vehicleSubtypes:medium_tank;type:skin;approved:yes",  
+			"name_english": "M60, 33rd Armor Regiment",  
+			"icon_url": "https://wt-ugc.cdn.gaijin.net/wg/n6/c7mvwzidcjqiaf2vddugzltnubks-clvr.icon.jpg",  
+			"appId": 1067,  
+			"provider": "live",  
+			"author_name": "ItssLuBu",  
+			"description_russian": "M60, 33-й Танковый Полк",  
+			"type": "skin",  
+			"meta": "bmFtZTp0PSJ1c2VyIg0KbW9kZWxOYW1lOnQ9InVzX202MCINC...",  
+			"link": "https://live.warthunder.com/post/937249/",  
+			"item_quality": 1,  
+			"name_color": "FFFFFF",  
+			"name_russian": "M60, 33-й Танковый Полк",  
+			"background_color": 0,  
+			"icon_url_large": "https://wt-ugc.cdn.gaijin.net/pr/65/44j24o3mc4b7wu7a4wxltod3sn6w-fu7r.icon_large.jpg"  
+		}  
+	}  
+	```  
 ## Other endpoints  
 ### https://auth.gaijinent.com/login.php  
 - `POST` request  
-- Returns JSON  
 - Request form:  
 	```json  
 	{  
