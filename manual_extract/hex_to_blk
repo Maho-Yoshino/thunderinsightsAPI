@@ -1,0 +1,60 @@
+#!/bin/bash
+cd "$(dirname "$0")"
+if [[ ! -f ./raw_hex ]]; then
+    echo "raw_hex file does not exist, creating a new one"
+    touch "raw_hex"
+    exit 1
+fi
+
+force_args=()
+positional=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --force)
+            if [[ -z "$2" || "$2" == --* ]]; then
+                echo "--force requires an algorithm: lz4 or bzip"
+                exit 1
+            fi
+            if [[ "$2" != "lz4" && "$2" != "bzip" ]]; then
+                echo "--force must be one of: lz4, bzip"
+                exit 1
+            fi
+            force_args=(--force "$2")
+            shift 2
+            ;;
+        --force=*)
+            if [[ "${1#*=}" != "lz4" && "${1#*=}" != "bzip" ]]; then
+                echo "--force must be one of: lz4, bzip"
+                exit 1
+            fi
+            force_args=(--force "${1#*=}")
+            shift
+            ;;
+        *)
+            positional+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ ${#positional[@]} -eq 0 ]]; then
+    echo "Usage: $0 [--force lz4|bzip] name [suffix]"
+    exit 1
+fi
+
+if [[ ${#positional[@]} -ge 2 ]]; then
+    filename="${positional[0]}_${positional[1]}"
+else 
+    filename="${positional[0]}"
+fi
+cat "./raw_hex" | xxd -r -p > "./$filename.blk" && echo "Outputted HEX values into '$filename.blk'"
+./.venv/bin/python ./decompress.py "${force_args[@]}" "$filename.blk"
+if wt_ext_cli unpack_raw_blk --input_dir "$filename.blk" --output_dir "$filename" >/dev/null 2>&1; then
+    echo "Successfully converted from blk to json"
+    echo "Converted file can be found at $filename.json"
+    rm "./$filename.blk"
+else
+    echo "Failed to convert from blk to json"
+    echo "Kept the HEX file saved for further analysis"
+fi

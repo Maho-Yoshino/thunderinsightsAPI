@@ -1,4 +1,5 @@
 # Gaijin's endpoints used ingame  
+**Written for game version `2.55.1.88`**  
 Many of the shown 'endpoints' are actually just requests to the given server, with a specific `action` header set  
 This isn't an exhaustive list, these are just all I could find through inspecting HTTP traffic  
 Not all endpoints shall be documented, as it would take forever to decode and document every single endpoint (and some of them are outright impossible to replicate, like `cln_accept_eula`)  
@@ -44,6 +45,7 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 ### cln_recycle_items  
 ### cln_inventory_purchase_item  
 ### cln_apply_spare_item  
+### cln_clan_find_by_prefix  
 ### ano_clan_accept_membership_request  
 - `POST` request  
 - Headers  
@@ -71,6 +73,18 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 	- `gameVersion`  
 - Request form  
 	- HEX  
+- Response form  
+	- "!OK"  
+### ano_clan_change_member_role  
+- `POST` request  
+- Header  
+	- `uidHint` (Self ID)  
+	- `userid` (Member to change)  
+- Request form  
+	- HEX  
+	```hexpat  
+	struct  
+	```  
 - Response form  
 	- "!OK"  
 ### cln_get_initial_meta  
@@ -136,6 +150,7 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 		]  
 	}  
 	```  
+### cln_flush_clan_exp_to_unit  
 ## Contact proxy endpoints  
 - Same as before (example: https://contact-proxy-02.gaijin.net/json)  
 ### cln_get_allowed_to_be_added_to_contacts  
@@ -163,6 +178,9 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 	}  
 	```  
 	- Yes it is actually called `satus`  
+	- `satus`  
+		- `requestsToMe`  
+		- `meInBlacklist`  
 - Response form:  
 	```json  
 	{  
@@ -205,6 +223,7 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 		}  
 	}  
 	```  
+### cln_find_users_by_nick_prefix_json  
 ## Inventory proxy endpoints  
 - Same as before (example: https://inventory-proxy-01.gaijin.net/char)  
 ### GetItemDefsClient  
@@ -425,6 +444,43 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 		}  
 	}  
 	```  
+## Yupmaster endpoints  
+- Queries done by the in-house launcher of gaijin  
+- The root of these endpoints are all `https://yupmaster.gaijinent.com`  
+### /launcher/version.php  
+- `GET` request  
+- Query parameters  
+	- `app_id` (The app to get the version of)  
+	- `ver` (Current version, optional)  
+- Query parameter examples  
+	- `app_id`  
+		- `WarThunderLauncherLinux`  
+		- `PromoWarThunderMain`  
+- Response  
+	- A single string, containing the version number  
+		- E.g. `1.0.3.40` (launcher) or `2.55.1.56` (wt) as of writing  
+		- The WT version is **not** the current downloaded version  
+### /launcher/cdn_conf.php  
+- `GET` request  
+- Query parameters  
+	- `proj` (The app to get the version of, in this case `warthunder`)  
+- Response  
+	- A JSON containing data about different seed URLs and trackers  
+### /yuitem/get_version.php  
+- `GET` request  
+- Query parameters  
+	- `proj` (The app to get the version of)  
+	- `tag`  
+- Query parameter examples  
+	- `proj`  
+		- `warthunder`  
+	- `tag`  
+		- `[no content]` (production version)  
+		- `dev` (dev version)  
+		- `dev-stable` (dev_stable version)  
+- Response  
+	- A single string, containing the version number (e.g. `2.55.1.88` as of writing)  
+	- This version is the actual, downloaded version  
 ## Other endpoints  
 ### https://auth.gaijinent.com/login.php  
 - `POST` request  
@@ -437,7 +493,8 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 		"login": "<email>",  
 		"meta": 1,  
 		"password": "<password>",  
-		"v":2  
+		"v":2,  
+		"2step": 999999  
 	}  
 	```  
 	Optional data:  
@@ -445,6 +502,7 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 	- `gapp_id` (unsure what this does, probably used for tracking logins)  
 	- `meta` (only sends metadata, such as creation location, CC URL used, registration IP, etc.)  
 	- `v` (Unsure what this does)  
+	- `2step` (2FA verification code)  
 - Response form schema:  
 	```json  
 	{  
@@ -496,13 +554,13 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 			- `wt_quiz_success` (no clue)  
 			- `infantry_cbt_requester` (probably a temporary flag, requested Infantry CBT participation)  
 			- `lang_*` (computer locale on account creation?)  
-- Can extend token lifetime by calling the URL but with the following data:  
-	```json  
-	{  
-		"token": "token"  
-	}  
-	```  
-- The game usually refreshes the token every 30 minutes  
+### https://auth.gaijinent.com/login_token.php  
+- `POST` request  
+- Request form  
+	- `token` (The token you aquire through logging in normally)  
+- Same as the `login.php` in response format  
+- The endpoint extends the lifetime of the token  
+- The game usually calls this endpoint every 30 minutes  
 ### https://static-ggc.gaijin.net/units/*.png  
 - GET request  
 - the `*` must be replaced with the internal name of a vehicle you want (e.g. "https://static-ggc.gaijin.net/units/uk_churchill_avre.png")  
