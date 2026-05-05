@@ -74,14 +74,11 @@ def decompress_file(input_file, output_file, force=None):
     elif force == "bzip":
         print("[*] Forcing bzip decompression")
         decompressed = decompress_bzip(all_data, force=True)
-    elif all_data[:1] == b'\x4c':
-        print("[*] Found LZ4 marker in the first byte")
-        decompressed = decompress_lz4(all_data)
-    elif b'BZh' in all_data[:20]:
-        decompressed = decompress_bzip(all_data)
     else:
-        print("[-] Neither LZ4 nor bzip compression could be found in the file.")
-        return False
+        if b'BZh' in all_data[:20]:
+            decompressed = decompress_bzip(all_data)
+        if decompressed is None:
+            decompressed = decompress_lz4(all_data, force=True)
 
     if decompressed is None:
         return False

@@ -87,6 +87,7 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 	```  
 - Response form  
 	- "!OK"  
+### ano_clan_reject_membership_request  
 ### cln_get_initial_meta  
 - `POST` request  
 - Header  
