@@ -92,6 +92,14 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 - `POST` request  
 - Header  
 	- `uidHint` (Account UID)  
+- Body notes  
+	- Sends a lot of info on the computer  
+	- Sends 2 values that are computed dynamically, that I must add  
+		- `uuid2` (SHA1 sum of the concatenated `/dev/disk/by-id/` entries that point (symlink) to the root partition, in raw `readdir` order)  
+		- `uuid3` (SHA1 sum of the root partition's UUID, with a single trailing space, extracted from `/proc/cmdline`)  
+- Response  
+	- Sends a LOT of game data back  
+	- Includes `remoteSuccessSaveAsyncTaskId`, which is used for authentication on some endpoints  
 ### cln_get_price_ex  
 - `POST` request  
 - Header  

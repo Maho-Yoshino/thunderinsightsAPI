@@ -1,0 +1,8 @@
+{
+    "auth": true,
+    "format": null,
+    "headers": {
+        "action":"cln_get_users_terse_info",
+        "usersList": "<replace>"
+    }
+}

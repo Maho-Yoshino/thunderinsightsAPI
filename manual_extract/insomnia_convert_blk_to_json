@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+input_file="$1"
+mode="${2:-raw}"
+force_arg="${3:-}"
+
+work_dir="$(mktemp -d /tmp/insomnia_blk_convert.XXXXXX)"
+trap 'rm -rf "$work_dir"' EXIT
+
+output_base="$work_dir/output"
+blk_file="$output_base.blk"
+json_file="$output_base.json"
+
+if [[ "$mode" == "compressed" ]]; then
+	if [[ -n "$force_arg" ]]; then
+		cat "$input_file" | xxd -p -c 256 | ./hex_to_blk --force "$force_arg" --to-stdout > "$json_file"
+	else
+		cat "$input_file" | xxd -p -c 256 | ./hex_to_blk --to-stdout > "$json_file"
+	fi
+
+	cat "$json_file"
+	exit 0
+fi
+
+if [[ "$mode" == "raw" ]]; then
+	cp "$input_file" "$blk_file"
+
+	if wt_ext_cli unpack_raw_blk \
+		--input_dir "$blk_file" \
+		--output_dir "$json_file" \
+		--format Json >/dev/null 2>&1; then
+		cat "$json_file"
+		exit 0
+	else
+		echo "Failed to convert raw binary BLK to Json" >&2
+		exit 1
+	fi
+fi
+
+echo "Unknown mode: $mode" >&2
+exit 1
