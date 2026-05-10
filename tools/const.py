@@ -53,6 +53,7 @@ class UserAction(Enum):
     cln_recycle_items = auto(), ServerPool.CHAR
     cln_inventory_purchase_item = auto(), ServerPool.CHAR
     cln_apply_spare_item = auto(), ServerPool.CHAR
+    cln_clan_membership_request = auto(), ServerPool.CHAR
     ano_clan_accept_membership_request = auto(), ServerPool.CHAR
     ano_clan_dismiss_member = auto(), ServerPool.CHAR
     ano_clan_change_member_role = auto(), ServerPool.CHAR

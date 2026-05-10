@@ -1,0 +1,12 @@
+{
+    "auth": true,
+    "format": "blk",
+    "headers": {
+        "action":"cln_clan_membership_request",
+        "compr": "lz4hc"
+    },
+    "body": {
+        "_id": "<replace>",
+        "comments": ""
+    }
+}

@@ -1,0 +1,8 @@
+{
+    "auth": true,
+    "format": null,
+    "headers": {
+        "action":"cln_clan_get_leaderboard",
+        "sortField": "dr_era5_hist"
+    }
+}

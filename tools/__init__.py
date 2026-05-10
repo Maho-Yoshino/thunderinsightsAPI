@@ -1,15 +1,18 @@
 import json as _json
+from os import getenv
 from typing import Literal, Any
-from requests import Session, get as _get
+from requests import Session, get as _get, Response
+from requests.exceptions import JSONDecodeError
 from subprocess import run as _run
 from random import choice
+from fastapi import HTTPException
 from utils.auth import add_auth_headers
 from templates import TEMPLATES, load as load_template
 from .json_to_blk import json_to_blkx, blkx_to_blk, compress_lz4hc, compress_bzip2, find_binblk
 from .hex_to_json import lz4_decompress_try, bzip_decompress_try
 from .const import Action, UserAction, ServerPool
 
-_binblk = find_binblk()
+_binblk = find_binblk(getenv("BINBLK_PATH", None))
 _http = Session()
 _http.headers.update({"User-Agent": "ThunderAPI/1.0", "Accept": "*/*"})
 
@@ -59,7 +62,7 @@ class Request(dict):
 		self,
 		body: dict[str, Any] | None = None,
 		headers: dict[str, Any] | None = None,
-		send_format: Literal["json", "blk", "blk_lz4hc", "blk_bzip2"]|None = None,
+		send_format: Literal["json", "blk"]|None = None,
 	):
 		super().__init__(body if body is not None else {})
 		self.headers = {
@@ -68,7 +71,7 @@ class Request(dict):
 			"User-Agent": "ThunderAPI/1.0",
 			"transactid": "1",
 			"platform": "PC",
-			"platform-id": "9",
+			"platform_id": "9",
 			"comprTypes": "lz4hc;lz4;snappy;bzip2;gzip;vromfs;zstd;zlib"
 		}
 		if headers:
@@ -101,36 +104,51 @@ class Request(dict):
 			return compress_bzip2(blk)
 		return blk
 
-	def request(self) -> None:
+	def send(self, *, token_override:str = None, uid:int = None) -> dict[str, Any]:
 		if self.action is None and url is None: return
-		if isinstance(self.action, UserAction):
-			#TODO: Implement user actions potentially in the future
-			raise NotImplementedError("UserAction actions are not yet implemented.")
 		kwargs: dict[str, Any] = {"headers": self.headers}
+		for header, value in kwargs["headers"].items():
+			if isinstance(value, (bytes, str)):
+				continue
+			kwargs["headers"][header] = str(value)
 		url = get_server(self.action)
 		if self.format == "json":
 			kwargs["json"] = self
 		elif self.format != None:
-			compr = "lz4hc" if self.format == "blk_lz4hc" else "bzip2" if self.format == "blk_bzip2" else None
+			compr = self.headers.get("compr", None)
 			if self.format is not None:
 				kwargs["data"] = self._encode(compress=compr)
 			kwargs["headers"] = {**self.headers, "Content-Type": "application/octet-stream"}
 			if compr:
 				kwargs["headers"]["compr"] = compr
+		if token_override:
+			kwargs["headers"]["token"] = token_override
+			kwargs["headers"]["uidHint"] = str(uid)
 		resp = _http.post(url, **kwargs)
 
 		resp.raise_for_status()
-		self._decode(resp.content)  # Decode and store the response for potential later use
-	
-	def _decode(self, data: bytes) -> None:
-		"""Decode from compressed or raw .blk binary to json."""
+		self._decode(resp)
+		return self.result
 
-		payload = data
-		# Try lz4hc wire format: 4-byte BE size + raw block
-		if data[:1] != b"\x01" and len(data) > 4:
-			_ = lz4_decompress_try(data)
+	def _decode(self, response: Response) -> None:
+		"""Decode from compressed or raw .blk binary to json."""
+		if response.content.startswith(b"!ERROR:"):
+			raise HTTPException(status_code=500, detail=str(response.content))
+		if response.content.startswith(b"!OK"):
+			return # Nothing to parse
+		try:
+			self.result = response.json()
+			return # If valid JSON, do not convert
+		except JSONDecodeError:
+			pass # Not valid JSON, continue on to decompressing and decoding
+
+		payload = response.content
+		# Try lz4hc decompress first, then bzip2
+		# if neither worked, it assumes the data is raw blk
+		if payload[:1] != b"\x01" and len(payload) > 4:
+			_ = lz4_decompress_try(payload)
 			if _ is None:
-				_ = bzip_decompress_try(data)
+				_ = bzip_decompress_try(payload)
 			if _ is not None:
 				payload = _	
 		self.result = blk_to_json(payload)

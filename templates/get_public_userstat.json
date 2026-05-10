@@ -1,0 +1,8 @@
+{
+    "auth": true,
+    "format": null,
+    "headers": {
+        "action":"ano_get_public_userstat",
+        "userId": "<replace>"
+    }
+}

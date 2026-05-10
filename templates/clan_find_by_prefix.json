@@ -1,0 +1,11 @@
+{
+    "auth": true,
+    "format": null,
+    "headers": {
+        "action":"cln_clan_find_by_prefix",
+        "namePrefix": "<replace>",
+        "tagPrefix": "<replace>",
+        "start": 0,
+        "count": 20
+    }
+}

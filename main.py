@@ -3,8 +3,8 @@ from logging import getLogger
 from fastapi import FastAPI
 from uvicorn import run as uvicorn_run
 
-from api import users_router
 from utils.auth import login
+from api import users_router, clans_router, general_router
 
 logger = getLogger()
 
@@ -34,6 +34,8 @@ app = FastAPI(
     
 )
 app.include_router(users_router.router, prefix="/v1")
+app.include_router(clans_router.router, prefix="/v1")
+app.include_router(general_router.router, prefix="/v1")
 
 def main():
     if not load_dotenv(".env"):

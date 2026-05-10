@@ -4,3 +4,4 @@ apscheduler
 uvicorn
 requests
 lz4
+bs4

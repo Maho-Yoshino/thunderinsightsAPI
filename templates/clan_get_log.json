@@ -1,0 +1,12 @@
+{
+    "auth": true,
+    "format": "blk",
+    "headers": {
+        "action":"cln_clan_get_log",
+        "compr": "lz4hc"
+    },
+    "body": {
+        "_id": "<replace>",
+        "count": 10
+    }
+}
