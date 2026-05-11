@@ -1,10 +1,11 @@
 from typing_extensions import Annotated
 from typing import Literal, Any
-from fastapi import APIRouter, Path, Query, Form, HTTPException
+from fastapi import APIRouter, Query, Form, Path
 from fastapi.responses import JSONResponse
 from .shared import get_request, token_cache, get_cached_entry
 from requests import get as requests_get
 from utils.auth import login, __refresh_token
+from utils.replayParser import Replay
 from datetime import datetime, timedelta, UTC
 from pydantic import EmailStr
 from bs4 import BeautifulSoup, Tag
@@ -216,3 +217,14 @@ def get_news() -> list[NewsResponse]:
 	combined = pinned + unpinned
 	return JSONResponse([i.to_json() for i in combined])
 #endregion
+
+@router.get("/replay/{replayId}", summary="")
+def get_replay(replayId: Annotated[
+	str, 
+	Path(
+		title="The replay's ID to get",
+		pattern=r"^#?[0-9a-fA-F]{1,16}$",
+		description="Must be given in HEX format"
+	)
+]):
+	return Replay(replayId)

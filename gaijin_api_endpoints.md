@@ -655,6 +655,10 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 			- `discard` (GE vehicle)  
 			- `publisher` (Pack vehicle)  
 ### https://login.gaijin.net/en/sso/getShortToken  
+### https://wt-replays-cdnnow.cdn.gaijin.net/{match ID HEX}/xxxx.wrpl  
+- `GET` request  
+- Requires no authentication  
+- Returns a `wrpl` file  
 ## Endpoints not used ingame  
 ### http://newslist.gaijin.net:8080/news/warthunder/en/js  
 ### https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/\[pagenum\]/sort/dr_era5  
