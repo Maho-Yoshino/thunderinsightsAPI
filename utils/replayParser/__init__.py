@@ -16,16 +16,11 @@ sessionTypeDict = {
 class Replay(dict):
     def __init__(self, replay_id:int|str):
         super().__init__({})
-        if isinstance(replay_id, str): replay_id = int(replay_id, 16)
+        if isinstance(replay_id, str): replay_id = int(replay_id, 16) # Forces lowercase hex
         replay_id = f"{replay_id:016x}"
         #region wrpl download (first and last)
         wrpl_num = 0
-        r = get(f"https://wt-replays-cdnnow.cdn.gaijin.net/{replay_id}/0000.wrpl")
-        if not r.ok:
-            raise HTTPException(404, detail="Replay could not be found")
-        wrpl_num += 1
-        matchMetadata = r.content
-        prev_resp = r.content
+        prev_resp = None
         while True:
             while True:
                 r = get(f"https://wt-replays-cdnnow.cdn.gaijin.net/{replay_id}/{wrpl_num:04d}.wrpl")
@@ -34,34 +29,42 @@ class Replay(dict):
                 else:
                     break
             if r.status_code == 404:
+                if prev_resp is None:
+                    raise HTTPException(404, detail="Replay could not be found")
                 break
             if not r.ok:
                 raise HTTPException(500, detail="Replay server gave an error")
             wrpl_num += 1
             prev_resp = r.content
-        resultsMetadata = prev_resp
         #endregion
         #region Parse gaijin JSON to proper JSON
-        matchMetadata = ReplayParser(matchMetadata)
-        resultsMetadata = ReplayParser(resultsMetadata)
+        resultsData = ReplayParser(prev_resp)
         
-        self["matchId"] = matchMetadata.header.sessionIdHex
-        self["match"] = {}
-        self["match"]["version"] = matchMetadata.header.version
-        self["match"]["map"] = matchMetadata.header.level
-        self["match"]["mapSettings"] = matchMetadata.header.levelSettings
-        self["match"]["type"] = matchMetadata.header.battleType
-        self["match"]["difficulty"] = difficultyDict[matchMetadata.header.diff.difficulty]
-        self["match"]["sessionType"] = matchMetadata.header.sessionType
-        self["match"]["timeLimit"] = matchMetadata.header.timeLimit * 60
-        self["match"]["scoreLimit"] = matchMetadata.header.scoreLimit
-        self["match"]["battleClass"] = matchMetadata.header.battleClass
-
-        self["results"] = {}
-        _ = resultsMetadata.decode_body()
-        self["results"]["team1"] = {}
-        self["results"]["team2"] = {}
+        self.update({
+            "status": "OK",
+            "matchId": resultsData.header.sessionIdHex,
+            "match": {
+                "version": resultsData.header.version,
+                "map": resultsData.header.level,
+                "mapSettings": resultsData.header.levelSettings,
+                "type": resultsData.header.battleType,
+                "difficulty": difficultyDict[resultsData.header.diff.difficulty],
+                "sessionType": resultsData.header.sessionType,
+                "timeLimit": resultsData.header.timeLimit * 60,
+                "scoreLimit": resultsData.header.scoreLimit,
+                "battleClass": resultsData.header.battleClass
+            },
+            "results": {
+                "team1": {},
+                "team2": {}
+            }
+        })
+        _ = resultsData.body
         for user in _["player"]:
+
+            if user["userId"] == '-1':
+                continue
+
             user:dict[str, str|int|bool]
             add_obj = {
                 "clanTag": user.get("clanTag", None),

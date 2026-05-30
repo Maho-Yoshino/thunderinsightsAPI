@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, UTC
 from pydantic import EmailStr
 from bs4 import BeautifulSoup, Tag
 from enum import IntEnum
-from .models import LoginResponse, NewsResponse, LoginFail2FAResponse
+from .models import LoginResponse, NewsResponse, LoginFail2FAResponse, ReplayDataModel, ReplayNotFoundModel
 
 router = APIRouter(
 	tags=["general"],
@@ -227,7 +227,13 @@ def get_news() -> list[NewsResponse]:
 	return JSONResponse([i.to_json() for i in combined])
 #endregion
 
-@router.get("/replay/{replayId}", summary="")
+@router.get(
+	"/replay/{replayId}", 
+	summary="Gets data from a specified replay",
+	responses={
+		200: {"model": ReplayDataModel},
+		404: {"model": ReplayNotFoundModel, "description": "Replay not found"}
+	})
 def get_replay(replayId: Annotated[
 	str, 
 	Path(
