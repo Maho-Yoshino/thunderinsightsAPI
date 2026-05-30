@@ -2,7 +2,7 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, Path, Query
 from fastapi.responses import JSONResponse
 from urllib.parse import unquote
-from .shared import get_request, IntString
+from .shared import get_request
 from .models import TerseReturnModel, getUserDirectModel
 
 router = APIRouter(
@@ -11,7 +11,7 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
-def get_terse(*userIds:int|str) -> dict[IntString, TerseReturnModel]:
+def get_terse(*userIds:int|str) -> dict[str, TerseReturnModel]:
     request = get_request("get_users_terse_info")
     request.headers["usersList"] = ";".join(str(i) for i in userIds)
     return request.send()
@@ -23,7 +23,7 @@ def get_users_terse_info(
         description="Provide multiple IDs to get information about multiple users at once",
         min_length=1, 
         max_length=50)
-    ]) -> dict[IntString, TerseReturnModel]:
+    ]) -> dict[str, TerseReturnModel]:
     """Get terse information about users by their IDs."""
     return JSONResponse(get_terse(*id))
 
@@ -34,8 +34,12 @@ def get_user_direct(userid: Annotated[int, Path(title="The ID of the user to get
     result = request.send()
     return JSONResponse(result)
 
-@router.get("/search/{nick}", summary="Get users by name")
-def get_users_search(nick: Annotated[str, Path(title="The nickname to search for")], limit: Annotated[int, Query(title="How many users to retrieve", ge=2, le=50)] = 10):
+@router.get(
+    "/search/{nick}", 
+    summary="Get users by name",
+    responses={}
+)
+def get_users_search(nick: Annotated[str, Path(title="The nickname to search for")], limit: Annotated[int, Query(title="How many users to retrieve", ge=2, le=50)] = 10) -> dict[str, TerseReturnModel]:
     request = get_request("find_users_by_nick_prefix")
     request["nick"] = unquote(nick)
     request["maxCount"] = limit

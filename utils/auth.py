@@ -24,22 +24,21 @@ def __load_credentials() -> tuple[str, str]:
     
     return email, password
 
-def __2fa_login():
-    raise NotImplementedError("Not yet figured out. Please consider using an account without 2FA")
-
 def login(email_override:str = None, password_override:str = None, two_factor_code:int = None):
     if not email_override and not password_override:
         email, password = __load_credentials()
+    elif (email_override and not password_override) or (password_override and not email_override):
+        raise HTTPException(400, "Both email and password must be provided together.")
     else:
         email, password = (email_override, password_override)
-    _ = {
+
+    r = post(
+        "https://auth.gaijinent.com/login.php", 
+        data={
             "login": email,
             "password": password,
             "game": "wt"
-        }
-    r = post(
-        "https://auth.gaijinent.com/login.php", 
-        data=_, 
+        }, 
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "ThunderAPI/1.0"
@@ -48,13 +47,55 @@ def login(email_override:str = None, password_override:str = None, two_factor_co
         raise AuthenticationError(f"Login failed: {r.status_code} {r.text}")
     if r.content.startswith(b"!ERROR"):
         raise AuthenticationError(f"Login failed: {r.text}")
+
     data:dict[str, Any] = r.json()
     if data["status"] == "2STEP":
         two_factor_types = []
         if data.get("hasGjPass"): two_factor_types.append("GaijinPass")
         if data.get("hasTwoStepEmail"): two_factor_types.append("Email")
         if data.get("hasWTR"): two_factor_types.append("WTR")
-        __2fa_login()
+
+        if two_factor_code is None and (email_override or password_override):
+            return ( 
+                401, 
+                {
+                    "status": "2STEP",
+                    "types": two_factor_types,
+                    "requestId": data.get("requestId"),
+                    "userId": data.get("userId")
+                }
+            )
+
+        elif not email_override and not password_override:
+            while True:
+                try:
+                    two_factor_code = int(input(f"Enter 2FA code for user {email}: "))
+                    if two_factor_code < 100000 or two_factor_code > 999999:
+                        raise ValueError()
+                    break
+                except ValueError:
+                    print("Invalid input. Please enter a valid 2FA code.")
+
+        if not two_factor_code and "GaijinPass" in two_factor_types:
+            ...
+
+        r = post(
+            "https://auth.gaijinent.com/login.php",
+            data={
+                "login": email,
+                "password": password,
+                "game": "wt",
+                "2step": two_factor_code,
+            },
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "ThunderAPI/1.0"
+            }
+        )
+        data:dict[str, Any] = r.json()
+        if data["status"] == "2STEPERROR":
+            raise AuthenticationError("Invalid 2FA code provided.")
+        
     if data["status"] == "LOGINERROR":
         raise HTTPException(400, f"Login failed: {data["error"]}")
     if not email_override and not password_override:
@@ -65,12 +106,15 @@ def login(email_override:str = None, password_override:str = None, two_factor_co
         uidHint = data.get("user_id")  # Store the UID hint for use in authenticated requests
         if not scheduler.running:
             scheduler.start()  # Start the token refresh scheduler
-    return {
-        "jwt": data.get("jwt"),
-        "token": data.get("token"),
-        "expires": data.get("token_exp"),
-        "uid": data.get("user_id")
-    }
+    return (
+        200,
+        {
+            "jwt": data.get("jwt"),
+            "token": data.get("token"),
+            "expires": data.get("token_exp"),
+            "uid": data.get("user_id")
+        }
+    )
 #endregion
 
 #region Token Refresh
@@ -106,5 +150,3 @@ def add_auth_headers(headerData: dict[str, Any]) -> dict[str, Any]:
 class AuthenticationError(Exception):
     pass
 
-def __get_rsati() -> str:
-    raise NotImplementedError()

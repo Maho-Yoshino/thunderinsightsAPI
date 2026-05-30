@@ -10,42 +10,51 @@ from datetime import datetime, timedelta, UTC
 from pydantic import EmailStr
 from bs4 import BeautifulSoup, Tag
 from enum import IntEnum
-from .models import LoginResponse, NewsResponse
+from .models import LoginResponse, NewsResponse, LoginFail2FAResponse
 
 router = APIRouter(
 	tags=["general"],
 	responses={404: {"description": "Not found"}}
 )
 
-
 @router.post(
 	"/login", 
 	summary="Get token from War Thunder directly", 
-	description="You can use this token for the `POST` endpoints, which are user-specific. Given user must not have 2FA enabled, because it is not supported as of now. If you generated a token that hasn't expired yet, the endpoint will just give back the cached token."
+	description="You can use this token for the `POST` endpoints, which are user-specific. If given user has 2FA enabled, they must provide the 2FA code along with their credentials. If you generated a token that hasn't expired yet, the endpoint will just give back the cached token.",
+	responses={
+		200: {"model": LoginResponse, "description": "Success - Cached data"},
+		201: {"model": LoginResponse, "description": "Success - Newly fetched data"},
+		401: {"model": LoginFail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."}
+	}
 )
 def login_post(
 	email: Annotated[EmailStr, Form()],
 	password: Annotated[str, Form(min_length=6, max_length=64)],
-	#two_factor_code: Annotated[int, Form(min_length=6, max_digits=6)] = None
-) -> LoginResponse:
+	two_factor_code: Annotated[int, Form(ge=100000, le=999999)] = None
+):
 	for _email, data in dict(token_cache).items():
 		if datetime.now(UTC) >= datetime.fromtimestamp(token_cache[_email]["expires"], UTC):
 			token_cache.pop(_email)
 	if email in token_cache:
-		return JSONResponse(token_cache[email])
-	data = login(email, password)
+		_ = token_cache[email]
+		_["status"] = "OK"
+		return JSONResponse(_, status_code=200)
+	code, data = login(email, password, two_factor_code)
+	if code == 401:
+		return JSONResponse(data, status_code=401)
 	token_cache[email] = {
 		"session_token": data["jwt"],
 		"user_token": data["token"],
 		"expires": round((datetime.now(UTC) + timedelta(seconds=data["expires"])).timestamp(), 0),
-		"uidHint": data["uid"]
+		"uidHint": data["uid"],
+		"status": "OK"
 	}
-	return JSONResponse(token_cache[email])
+	return JSONResponse(token_cache[email], status_code=code)
 
 @router.post(
 	"/refresh-token", 
 	summary="Refresh your token so it stays alive for longer.",
-	description="If you are cached it will use the email to find the token. The game generally refreshes the token every 30 minutes."
+	description="If you are cached it will refresh the token. The game generally refreshes the token every 30 minutes."
 )
 def login_token(
 	user_token: Annotated[str, Form()]
