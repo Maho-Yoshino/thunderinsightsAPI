@@ -1,7 +1,9 @@
 {
     "auth": true,
+    "format": "blk",
     "headers": {
-        "action":"cln_clan_leave"
+        "action":"cln_clan_leave",
+        "compr": "lz4hc"
     },
     "body": {
         "comment":"comment"

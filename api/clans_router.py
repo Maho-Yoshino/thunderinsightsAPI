@@ -159,7 +159,7 @@ async def leave_squadron(
 ):
     response = await (await get_request(
         token, 
-        "clan_dismiss_member"
+        "clan_leave"
     )).send()
     return response.get("clanTag") is None
 

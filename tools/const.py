@@ -58,6 +58,7 @@ class UserAction(Enum):
     ano_clan_dismiss_member = auto(), ServerPool.CHAR
     ano_clan_change_member_role = auto(), ServerPool.CHAR
     ano_clan_reject_membership_request = auto(), ServerPool.CHAR
+    cln_clan_leave = auto(), ServerPool.CHAR
     cln_flush_clan_exp_to_unit = auto(), ServerPool.CHAR
     #endregion
     #region Contacts proxy
