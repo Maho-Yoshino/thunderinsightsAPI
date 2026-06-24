@@ -1,0 +1,12 @@
+{
+    "auth": true,
+    "format": "blk",
+    "headers": {
+        "action":"ano_clan_change_member_role",
+        "compr": "lz4hc",
+        "userid": "<replace>"
+    },
+    "body": {
+        "role": "<replace>"
+    }
+}

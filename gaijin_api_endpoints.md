@@ -79,13 +79,10 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 ### ano_clan_change_member_role  
 - `POST` request  
 - Header  
-	- `uidHint` (Self ID)  
 	- `userid` (Member to change)  
 - Request form  
-	- HEX  
-	```hexpat  
-	struct  
-	```  
+	- LZ4HC Compressed  
+	- `role` (Role index to set, e.g. 6 for Sergeant)  
 - Response form  
 	- "!OK"  
 ### ano_clan_reject_membership_request  

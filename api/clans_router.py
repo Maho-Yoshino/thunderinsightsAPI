@@ -3,10 +3,9 @@ from typing import Any
 from typing_extensions import Annotated
 from fastapi import APIRouter, Path, Query, Form, HTTPException
 from fastapi.responses import JSONResponse
-from enum import StrEnum
-from api.shared import get_request, IntString, TokenString
+from api.shared import get_request, TokenString
 from api.users_router import get_terse
-from api.models import ClanActions, clanRoles, clanPlatforms, ClanLogsModel, ClanEntry
+from api.models import ClanActions, ClanRoles, ClanLogsModel, ClanEntry, ClanRolesDisplay
 from utils.auth import users_cache
 
 _logger = getLogger(__name__)
@@ -126,9 +125,17 @@ async def reject_applicant(
 async def change_role(
     token: TokenString,
     userId: gaijinUserId,
-    role: Annotated[int, Query(title="The role to assign")] = None
+    role: Annotated[ClanRolesDisplay, Query(title="The role to assign")]
 ): 
-    ... # TODO: Implement
+    role = ClanRoles[role.name]
+    return await (await get_request(
+        token, 
+        "clan_change_member_role",
+        userid=userId,
+        body={
+            "role": role.value
+        }
+    )).send()
 
 @router.post(
     "/kick/{userId}",
@@ -148,7 +155,6 @@ async def kick_member(
             "comments": reason
         }
     )).send()
-    ... # TODO: Implement
 
 @router.post(
     "/leave",

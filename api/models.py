@@ -13,21 +13,27 @@ class ClanActions(Enum):
 	info = (4, "Squadron info changed")
 	create = (5, "Squadron created")
 
-clanRoles = {
-	1:"Commander",
-	2:"Officer",
-	3:"Private",
-	5:"Deputy",
-	6:"Sergeant"
-}
+class ClanRoles(Enum):
+	COMMANDER = 1
+	OFFICER = 2
+	PRIVATE = 3
+	NONE = 4
+	DEPUTY = 5
+	SERGEANT = 6
+class ClanRolesDisplay(Enum):
+	COMMANDER = "Commander"
+	OFFICER = "Officer"
+	PRIVATE = "Private"
+	NONE = "Unknown"
+	DEPUTY = "Deputy"
+	SERGEANT = "Sergeant"
 
-clanPlatforms = {
-	2:"pc",
-	5:"psn transferred to pc",
-	7:"psn",
-	9:"xbox transferred to pc",
-	12:"xbox"
-}
+class ClanPlatforms(Enum):
+	PC = 2
+	PSN_TRANSFER_PC = 5
+	PSN = 7
+	XBOX_TRANSFER_PC = 9
+	XBOX = 12
 
 class ClanLogsModel(BaseModel):
 	lastLog: str
