@@ -1,7 +1,12 @@
 python-dotenv
+
 fastapi
-apscheduler
 uvicorn
-requests
+
+apscheduler
+
 lz4
 bs4
+
+aiosqlite
+aiohttp

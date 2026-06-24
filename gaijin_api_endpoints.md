@@ -63,7 +63,8 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 	- `uidHint` (Kicking officer)  
 	- `gameVersion`  
 - Request form  
-	- HEX  
+	- `LZ4HC` compressed HEX  
+	- `comments` (The message given with the dismissal)  
 - Response form  
 	- "!OK"  
 ### cln_clan_membership_request  
@@ -88,6 +89,11 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 - Response form  
 	- "!OK"  
 ### ano_clan_reject_membership_request  
+### cln_clan_leave  
+- `POST` request  
+- `LZ4HC` compressed  
+- Request body  
+	- `comment` (Game defaults to a value of `comment` aswell)  
 ### cln_get_initial_meta  
 - `POST` request  
 - Header  
@@ -490,6 +496,15 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 - Response  
 	- A single string, containing the version number (e.g. `2.55.1.88` as of writing)  
 	- This version is the actual, downloaded version  
+### /launcher/update.php  
+- `GET` request  
+- Query parameters  
+	- `app_id` (For wt it is `PromoWarThunderMain`)  
+	- `consist` (The launcher just sends a value of `1`)  
+	- `ver` (URL safe version of currently downloaded version)  
+- Response  
+	- Some sort of token in the first line  
+	- Second line is an URL to downloading the .zip of the update  
 ## Other endpoints  
 ### https://auth.gaijinent.com/login.php  
 - `POST` request  
@@ -570,6 +585,21 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 - Same as the `login.php` in response format  
 - The endpoint extends the lifetime of the token  
 - The game usually calls this endpoint every 30 minutes  
+### https://auth.gaijinent.com/api/auth/requestTwoStep  
+- `GET` request  
+- Query parameters  
+	- `requestId` - Obtained from `login.php`  
+	- `userId` - Obtained from `login.php`  
+- Doesn't return anything really  
+	- If user doesn't respond in time the socket hangs up  
+	- If it hangs up the game usually sends another `login.php` and uses the new `requestId` from that  
+- Response form  
+	- `State`  
+	- `UserId` (The same as provided)  
+	- `Device` (Some sort of device ID)  
+	- `Request` (Same as provided)  
+	- `Message` (The 2FA code)  
+	- `v` (No clue lmao)  
 ### https://static-ggc.gaijin.net/units/*.png  
 - GET request  
 - the `*` must be replaced with the internal name of a vehicle you want (e.g. "https://static-ggc.gaijin.net/units/uk_churchill_avre.png")  

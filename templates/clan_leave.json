@@ -1,0 +1,9 @@
+{
+    "auth": true,
+    "headers": {
+        "action":"cln_clan_leave"
+    },
+    "body": {
+        "comment":"comment"
+    }
+}

@@ -11,7 +11,7 @@ Usage:
 
 import argparse, json, struct, sys
 from pathlib import Path
-from subprocess import run as run_process, PIPE
+from subprocess import run as run_process
 
 
 def print_err(message: str) -> None:

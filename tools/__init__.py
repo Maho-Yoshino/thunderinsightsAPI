@@ -1,21 +1,24 @@
 import json as _json
 from os import getenv
 from typing import Literal, Any
-from requests import Session, get as _get, Response
+from logging import getLogger
+from aiohttp import ClientResponse
+from requests import get as req_get
+from json import loads
 from requests.exceptions import JSONDecodeError
 from subprocess import run as _run
 from random import choice
 from fastapi import HTTPException
-from utils.auth import add_auth_headers
+from utils.auth import UserTokenCache
 from templates import TEMPLATES, load as load_template
 from .json_to_blk import json_to_blkx, blkx_to_blk, compress_lz4hc, compress_bzip2, find_binblk
 from .hex_to_json import lz4_decompress_try, bzip_decompress_try
 from .const import Action, UserAction, ServerPool
+from utils.auth import users_cache
+
+_logger = getLogger(__name__)
 
 _binblk = find_binblk(getenv("BINBLK_PATH", None))
-_http = Session()
-_http.headers.update({"User-Agent": "ThunderAPI/1.0", "Accept": "*/*"})
-
 
 def blk_to_json(data: bytes) -> dict[str, Any]:
 	"""Decode binary .blk (compressed or raw) to a JSON dict via wt_ext_cli."""
@@ -28,7 +31,7 @@ def blk_to_json(data: bytes) -> dict[str, Any]:
 	return _json.loads(result.stdout)
 
 #region Fetch server list once at import
-_resp = _get("https://public-configs-warthunder-gcore.cdn.gaijin.net/production/network.blk")
+_resp = req_get("https://public-configs-warthunder-gcore.cdn.gaijin.net/production/network.blk")
 if not _resp.ok:
 	raise RuntimeError(f"Failed to fetch server list: {_resp.status_code}")
 _cfg = blk_to_json(_resp.content)["production"]
@@ -58,11 +61,13 @@ def get_server(action: str) -> str:
 class Request(dict):
 	"""Dict-backed request with headers, wire-format encoding, and .request() shortcut."""
 	response:dict[str, Any]|None
+	login: UserTokenCache.Entry = None
 	def __init__(
 		self,
 		body: dict[str, Any] | None = None,
 		headers: dict[str, Any] | None = None,
 		send_format: Literal["json", "blk"]|None = None,
+		login: UserTokenCache.Entry = None
 	):
 		super().__init__(body if body is not None else {})
 		self.headers = {
@@ -79,20 +84,22 @@ class Request(dict):
 		self.format = send_format
 		self.action = self.headers.get("action", None)
 		self.url = get_server(self.action)
+		self.login = login
 		self.response = None  # Placeholder for storing the response of a request if needed
 
 	@classmethod
-	def from_template(cls, name: str) -> "Request":
+	async def from_template(cls, login:UserTokenCache.Entry, name: str) -> "Request":
 		if name not in TEMPLATES:
 			raise ValueError(f"Unknown template '{name}'. Available: {TEMPLATES}")
 		tpl = load_template(name)
 		headers = tpl.get("headers", {})
 		if tpl.get("auth", False):
-			headers = add_auth_headers(headers)
+			headers = await login.add_auth_headers(headers)
 		return cls(
 			body=tpl.get("body"), 
 			headers=tpl.get("headers"), 
-			send_format=tpl.get("format", "json")
+			send_format=tpl.get("format", "json"),
+			login=login
 		)
 
 	def _encode(self, compress: Literal["lz4hc", "bzip2"] | None = None) -> bytes:
@@ -104,7 +111,7 @@ class Request(dict):
 			return compress_bzip2(blk)
 		return blk
 
-	def send(self, *, token_override:str = None, uid:int = None) -> dict[str, Any]:
+	async def send(self) -> dict[str, Any]:
 		if self.action is None and url is None: return
 		kwargs: dict[str, Any] = {"headers": self.headers}
 		for header, value in kwargs["headers"].items():
@@ -116,42 +123,52 @@ class Request(dict):
 			kwargs["json"] = self
 		elif self.format != None:
 			compr = self.headers.get("compr", None)
-			if self.format is not None:
-				kwargs["data"] = self._encode(compress=compr)
+			kwargs["data"] = self._encode(compress=compr)
 			kwargs["headers"] = {**self.headers, "Content-Type": "application/octet-stream"}
 			if compr:
 				kwargs["headers"]["compr"] = compr
-		if token_override:
-			kwargs["headers"]["token"] = token_override
-			kwargs["headers"]["uidHint"] = str(uid)
-		resp = _http.post(url, **kwargs)
+		kwargs["headers"]["token"] = self.login.session_token
+		kwargs["headers"]["uidHint"] = str(self.login.uidHint)
+		session = await users_cache._enter_op()
+		try:
+			resp = await session.post(url, **kwargs)
+			await self._decode(resp)
+		except Exception:
+			_logger.exception("An exception occurred while sending a request to gaijin")
+			raise
+		finally:
+			await users_cache._exit_op()
 
-		resp.raise_for_status()
-		self._decode(resp)
 		return self.result
 
-	def _decode(self, response: Response) -> None:
+	async def _decode(self, response: ClientResponse) -> None:
 		"""Decode from compressed or raw .blk binary to json."""
-		if response.content.startswith(b"!ERROR:"):
-			raise HTTPException(status_code=500, detail=str(response.content))
-		if response.content.startswith(b"!OK"):
+		content = await response.read()
+		if content.startswith(b"!ERROR:"):
+			raise HTTPException(status_code=500, detail=str(content))
+		if content.startswith(b"!OK"):
+			self.result = {
+				"status": "success"
+			}
 			return # Nothing to parse
 		try:
-			self.result = response.json()
+			self.result = loads(content.decode("utf-8"))
 			return # If valid JSON, do not convert
-		except JSONDecodeError:
+		except (JSONDecodeError, UnicodeDecodeError):
 			pass # Not valid JSON, continue on to decompressing and decoding
+		except Exception:
+			_logger.exception("An exception occurred while decoding the returned binary")
+			raise
 
-		payload = response.content
 		# Try lz4hc decompress first, then bzip2
 		# if neither worked, it assumes the data is raw blk
-		if payload[:1] != b"\x01" and len(payload) > 4:
-			_ = lz4_decompress_try(payload)
+		if content[:1] != b"\x01" and len(content) > 4:
+			_ = lz4_decompress_try(content)
 			if _ is None:
-				_ = bzip_decompress_try(payload)
+				_ = bzip_decompress_try(content)
 			if _ is not None:
-				payload = _	
-		self.result = blk_to_json(payload)
+				content = _	
+		self.result = blk_to_json(content)
 
 	def to_json(self, indent: int | None = 2) -> str:
 		return _json.dumps(self, indent=indent, ensure_ascii=False)

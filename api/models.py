@@ -2,15 +2,16 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from .shared import IntString
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 
 #region Clans router
-class ClanActions(StrEnum):
-	rem = "Kick user"
-	add = "Accept membership request"
-	role = "Role change"
-	reject_candidate = "Rejected membership request"
-	info = "Squadron info changed"
+class ClanActions(Enum):
+	rem = (0, "Kick user")
+	add = (1, "Accept membership request")
+	role = (2, "Role change")
+	reject_candidate = (3, "Rejected membership request")
+	info = (4, "Squadron info changed")
+	create = (5, "Squadron created")
 
 clanRoles = {
 	1:"Commander",
@@ -29,109 +30,124 @@ clanPlatforms = {
 }
 
 class ClanLogsModel(BaseModel):
-	time: int
-	affectedId: int
-	affectedNick: str
-	action: str
-	adminId: int
-	adminNick: str
-	oldRole: str | None = Field(default=None, description="Previous role. Only present for role-change log entries.")
-	newRole: str | None = Field(default=None, description="New role. Only present for role-change log entries.")
+	lastLog: str
+	logs: list[ClanLogs]
+	class ClanLogs(BaseModel):
+		class _affected(BaseModel):
+			_id: int
+			nickname: str
+		class _action(BaseModel):
+			value: int
+			detail: str
+		class _admin(BaseModel):
+			_id: int
+			nickname: str
+
+		class _roleChange(BaseModel):
+			old: str | None = Field(default=None, description="Previous role. Only present for role-change log entries.")
+			new: str | None = Field(default=None, description="New role. Only present for role-change log entries.")
+
+
+		timestamp: int
+		affected: _affected
+		action: _action
+		admin: _admin
+		roleChange: _roleChange | None = Field(default=None)
 
 class ClanEntry(BaseModel):
 	class ClanSeasonRatingRewardsModel(BaseModel):
-		t:int
-		seasonId:int
-		seasonStartTimestamp: int
-		seasonEndTimestamp: int
-		numInYear: int
-		regaliaTags: str
+		t: int | None = None
+		seasonId: int | None = None
+		seasonStartTimestamp: int | None = None
+		seasonEndTimestamp: int | None = None
+		numInYear: int | None = None
+		regaliaTags: str | None = None
 	class MemberModel(BaseModel):
 		uid: IntString
 		nick: str
 		role: int
 		platform: int
 		max_unit_rank: int
-		initiator: IntString
-		initiator_nick: str
+		initiator: IntString | None = None
+		initiator_nick: str | None = None
 		date: int
 	class astatModel(BaseModel):
-		deaths_hist: int
-		ftime_hist: int
-		akills_hist: int
-		dr_era5_hist: int
-		gkills_hist: int
-		battles_hist: int
-		wins_hist: int
-		dr_era0_arc: int
-		dr_era0_hist: int
-		dr_era0_sim: int
-		dr_era1_arc: int
-		dr_era1_hist: int
-		dr_era1_sim: int
-		dr_era2_arc: int
-		dr_era2_hist: int
-		dr_era2_sim: int
-		dr_era3_arc: int
-		dr_era3_hist: int
-		dr_era3_sim: int
-		dr_era4_arc: int
-		dr_era4_hist: int
-		dr_era4_sim: int
-		dr_era5_arc: int
-		dr_era5_sim: int
-		dr_era6_arc: int
-		dr_era6_hist: int
-		dr_era6_sim: int
-		dr_era7_arc: int
-		dr_era7_hist: int
-		dr_era7_sim: int
-		dr_era8_arc: int
-		dr_era8_hist: int
-		dr_era8_sim: int
-		dr_era9_arc: int
-		dr_era9_hist: int
-		dr_era9_sim: int
+		deaths_hist: int | None = None
+		ftime_hist: int | None = None
+		akills_hist: int | None = None
+		dr_era5_hist: int | None = None
+		gkills_hist: int | None = None
+		battles_hist: int | None = None
+		wins_hist: int | None = None
+		dr_era0_arc: int | None = None
+		dr_era0_hist: int | None = None
+		dr_era0_sim: int | None = None
+		dr_era1_arc: int | None = None
+		dr_era1_hist: int | None = None
+		dr_era1_sim: int | None = None
+		dr_era2_arc: int | None = None
+		dr_era2_hist: int | None = None
+		dr_era2_sim: int | None = None
+		dr_era3_arc: int | None = None
+		dr_era3_hist: int | None = None
+		dr_era3_sim: int | None = None
+		dr_era4_arc: int | None = None
+		dr_era4_hist: int | None = None
+		dr_era4_sim: int | None = None
+		dr_era5_arc: int | None = None
+		dr_era5_sim: int | None = None
+		dr_era6_arc: int | None = None
+		dr_era6_hist: int | None = None
+		dr_era6_sim: int | None = None
+		dr_era7_arc: int | None = None
+		dr_era7_hist: int | None = None
+		dr_era7_sim: int | None = None
+		dr_era8_arc: int | None = None
+		dr_era8_hist: int | None = None
+		dr_era8_sim: int | None = None
+		dr_era9_arc: int | None = None
+		dr_era9_hist: int | None = None
+		dr_era9_sim: int | None = None
 		activity: int
 		clan_activity_by_periods: int    
-	pos: int
-	_id: IntString
-	announcement:str
-	autoaccept:bool
-	cdate: int
-	changed_by_uid: IntString
-	changed_time: int
-	creator_uid: IntString
-	currentTagRegalia: str
-	desc: str
-	interlockid: int
-	lastPaidTag: str
-	members_cnt: int
-	name: str
-	namel: str
-	region: str
-	region_last_updated: int
-	regionl: str
-	slogan: str
-	status: str
-	tag: str
-	tagl: str
-	transactions: list[str]
-	type: str
-	clanSeasonRatingRewards: ClanSeasonRatingRewardsModel
-	members: list[MemberModel]
-	membership_req: dict
-	astat: astatModel
-	clanRewardRatingPerUser_60: dict
+	pos: int | None = None
+	_id: IntString | None = None
+	announcement: str | None = None
+	autoaccept: bool | None = None
+	cdate: int | None = None
+	changed_by_uid: IntString | None = None
+	changed_time: int | None = None
+	creator_uid: IntString | None = None
+	currentTagRegalia: str | None = None
+	desc: str | None = None
+	interlockid: int | None = None
+	lastPaidTag: str | None = None
+	members_cnt: int | None = None
+	name: str | None = None
+	namel: str | None = None
+	region: str | None = None
+	region_last_updated: int | None = None
+	regionl: str | None = None
+	slogan: str | None = None
+	status: str | None = None
+	tag: str | None = None
+	tagl: str | None = None
+	transactions: list[str] | None = None
+	type: str | None = None
+	clanSeasonRatingRewards: ClanSeasonRatingRewardsModel | dict | None = None
+	members: list[MemberModel] | MemberModel | None = None
+	membership_req: dict | None = None
+	astat: astatModel | None = None
+	clanRewardRatingPerUser_60: dict | None = None
+
+	class Config:
+		extra = "allow"
 #endregion
 #region General router
 #region /v1/login
 class LoginResponse(BaseModel):
-	session_token: str = Field(description="Used for accessing many of the `POST` endpoints. Changes with new logins")
-	user_token: str = Field(description="Used for refreshing so the token stays alive. It is bound to the user, doesn't change.")
-	expires: int
 	status: Literal["OK"] = "OK"
-
+	token: str
 class LoginFail2FAResponse(BaseModel):
 	types: set[Literal["GaijinPass", "Email", "WTR"]] = Field(description="The types of 2FA that the account has enabled.")
 	status: Literal["2STEP"] = "2STEP"

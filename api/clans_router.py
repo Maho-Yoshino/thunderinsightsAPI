@@ -1,11 +1,18 @@
+from logging import getLogger
 from typing import Any
 from typing_extensions import Annotated
 from fastapi import APIRouter, Path, Query, Form, HTTPException
 from fastapi.responses import JSONResponse
 from enum import StrEnum
-from .shared import get_request, IntString, token_cache, get_cached_entry
+from api.shared import get_request, IntString, TokenString
 from api.users_router import get_terse
-from .models import ClanActions, clanRoles, clanPlatforms, ClanLogsModel, ClanEntry
+from api.models import ClanActions, clanRoles, clanPlatforms, ClanLogsModel, ClanEntry
+from utils.auth import users_cache
+
+_logger = getLogger(__name__)
+
+squadronId = Annotated[int, Path(title="The squadron's ID", gt=0)]
+gaijinUserId = Annotated[int, Path(title="The user's ID", gt=0)]
 
 router = APIRouter(
     prefix="/clans",
@@ -13,105 +20,273 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
-@router.post("/{clanid}/logs", summary="Gets the squadron logs")
-def get_clan_logs(
-    clanid: Annotated[int, Path(title="The squadron to get the logs of", gt=0)], 
-    token: Annotated[str, Form()],
-    limit: Annotated[int, Query(title="", gt=0, lt=50)] = 10,
-) -> list[ClanLogsModel]:
-    request = get_request("clan_get_log")
-    request["_id"] = clanid
-    request["count"] = limit
+async def tokenSquadronId(token:str) -> int|None:
+    if (_ := await users_cache.get(token)) is not None:
+        userdata = (await get_terse(token, *(_.uidHint,))).get(str(_.uidHint))
+        if userdata.get("clanName") is not None:
+            squadronData = await get_clan_search(token, clanName=userdata["clanName"])
+            for squadron in squadronData:
+                for member in squadron["members"]:
+                    if int(member["uid"]) == _.uidHint:
+                        return int(squadron["_id"])
+        return None
+    else:
+        raise HTTPException(401, "Invalid token provided")
+
+@router.post(
+    "/{clanId}/apply", 
+    summary="Sends an application to the squadron, if allowed"
+)
+async def send_application(
+    clanId: squadronId,
+    token: TokenString
+) -> bool:
+    response = await (await get_request(
+        token, 
+        "clan_membership_request", 
+        body = {
+            "_id": clanId
+        }
+    )).send()
+    return response.get("clanTag") is not None
+@router.post(
+    "/{clanId}/applicants", 
+    summary="Gets the currently applying members"
+)
+async def get_applicants(
+    token: TokenString,
+    clanId: squadronId
+):
+    clanData = await get_clan(token, clanId)
+    data = []
+    candidates = clanData.get("candidates")
+    if candidates is None:
+        return []
+    if isinstance(candidates, dict):
+        return [
+            {
+                "uid": candidates["uid"],
+                "nickname": candidates["nick"],
+                "timestamp": candidates["date"],
+                "comment": candidates["comments"],
+                "ip": candidates["ip"]
+            }
+        ]
+    for entry in clanData.get("candidates"):
+        data.append({
+            "uid": entry["uid"],
+            "nickname": entry["nick"],
+            "timestamp": entry["date"],
+            "comment": entry["comments"],
+            "ip": entry["ip"]
+        })
+    return data
+@router.post(
+    "/accept/{userId}"
+)
+async def accept_applicant(
+    token: TokenString,
+    userId: gaijinUserId
+): 
+    response = await (await get_request(
+        token, 
+        "clan_accept_membership_request",
+        userId=userId,
+        body={
+            "_id": await tokenSquadronId(token)
+        }
+    )).send()
+    return response
+    ... # TODO: Implement
+
+@router.post(
+    "/reject/{userId}"
+)
+async def reject_applicant(
+    token: TokenString,
+    userId: gaijinUserId,
+    message: Annotated[str, Query(title="Message to include alongside rejection")] = ""
+): 
+    response = await (await get_request(
+        token, 
+        "clan_accept_membership_request",
+        userId=userId,
+        body={
+            "_id": await tokenSquadronId(token),
+            "comments": message
+        }
+    )).send()
+    return response
+
+@router.post(
+    "/role/{userId}", 
+    summary="Get or set a member's role", 
+    description="Getting a member's role can be done by anyone, however setting requires deputy or commander"
+)
+async def change_role(
+    token: TokenString,
+    userId: gaijinUserId,
+    role: Annotated[int, Query(title="The role to assign")] = None
+): 
+    ... # TODO: Implement
+
+@router.post(
+    "/kick/{userId}",
+    summary="Kicks the given user",
+    description="Requires either `Officer`, `Deputy` or `Commander` rank to remove someone else"
+)
+async def kick_member(
+    token: TokenString,
+    userId: gaijinUserId,
+    reason: Annotated[str, Form(title="The reason for kicking")] = ""
+):
+    return await (await get_request(
+        token, 
+        "clan_dismiss_member",
+        userId=userId,
+        body={
+            "comments": reason
+        }
+    )).send()
+    ... # TODO: Implement
+
+@router.post(
+    "/leave",
+    summary="Leaves the current squadron"
+)
+async def leave_squadron(
+    token: TokenString
+):
+    response = await (await get_request(
+        token, 
+        "clan_dismiss_member"
+    )).send()
+    return response.get("clanTag") is None
+
+@router.post(
+    "/{clanId}/logs", 
+    summary="Gets the squadron logs"
+)
+async def get_clan_logs(
+    clanId: squadronId, 
+    token: TokenString,
+    limit: Annotated[int, Query(title="The max ammount to get at once", gt=0, le=50)] = 10,
+    fromEntry: Annotated[str, Query(title="The last call's 'lastLog' value to begin searching from")] = None
+) -> ClanLogsModel:
+    allLogs = (await tokenSquadronId(token)) == clanId
     try:
-        response = request.send(token)
-    except Exception as e:
-        pass
+        response = await get_request(
+            token, 
+            "clan_get_log",
+            body = {
+                "_id":clanId,
+                "count":limit,
+                "events": "create;info"
+            }
+        )
+        if (allLogs):
+            response.pop("events")
+        if fromEntry:
+            response["last"] = fromEntry
+
+        response = await response.send()
+    except HTTPException as e:
+        if e.detail == "b'!ERROR:CLAN_YOU_HAVE_NO_RIGHT'":
+            raise HTTPException(403, "You do not have permission to view this squadron's logs.")
+        _logger.exception("An exception occurred in squadron logs endpoint")
+        raise
+
     logs:list[dict[str, int|str]] = []
     for item in response["log"]:
-        _ = {
-            "time": item["time"],
-            "affectedId": item["uid"],
-            "affectedNick": item["nick"],
-            "action": ClanActions[item["ev"]],
-            "adminId": item["uId"],
-            "adminNick": item["uN"]
+        item:dict[str, int|str]
+        action = ClanActions[item["ev"]]
+        logEntry = {
+            "timestamp": item["time"],
+            "action": {
+                "value": action.value[0],
+                "detail": action.value[1]
+            }
         }
-        if _["action"] == ClanActions.role:
-            _.update({
-                "oldRole": item["old"],
-                "newRole": item["new"]
-            })
-        elif _["action"] == ClanActions.info:
-            if (_2 := _.get("tag")):
-                _["NewTag"] = _2
-            if (_2 := _.get("")): ...
-        logs.append(_)
+        if item.get("uId") is not None:
+            logEntry["admin"] = {
+                "_id": item["uId"],
+                "nickname": item["uN"]
+            }
+        if item.get("uid") is not None:
+            logEntry["affected"] = {
+                "_id": item["uid"],
+                "nickname": item["nick"],
+            }
+        match action:
+            case ClanActions.role:
+                logEntry.update({
+                    "roleChange": {
+                        "old": item["old"],
+                        "new": item["new"]
+                    }
+                })
+            case ClanActions.info:
+                for i in ["tag", "desc", "region", "status"]: 
+                    if (_ := item.get(i)):
+                        logEntry[i] = _
+            case ClanActions.create:
+                logEntry["info"] = {}
+                for i in ["type", "name", "tag", "slogan", "desc", "region", "announcement"]:
+                    logEntry["info"][i] = item[i]
+        logs.append(logEntry)
 
-    return JSONResponse(logs)
+    return JSONResponse({
+        "lastLog": response["lastMark"],
+        "logs": logs
+    })
 
-
-
-@router.get("/search/{clanName}", summary="Search for squadron")
-def get_clan_search(
-    clanName: Annotated[str, Path(title="Squadron's name to look for")],
+@router.post("/search/", summary="Search for squadron")
+async def get_clan_search(
+    token: TokenString,
+    clanName: Annotated[str, Query(title="Squadron name to look up")] = None,
+    clanTag: Annotated[str, Query(title="Squadron tag to look up")] = None,
     limit: Annotated[int, Query(title="Amount of squadrons to return", gt=0, lt=50)] = 10
 ) -> list[ClanEntry]:
-    request = get_request("clan_find_by_prefix")
-    request.headers["clanPrefix"] = clanName
-    request.headers["tagPrefix"] = clanName
-    request.headers["count"] = limit
+    if clanName is None and clanTag is None:
+        raise HTTPException(400, "You must provide either a clanName or clanTag")
+    response = await get_request(
+        token, 
+        "clan_find_by_prefix",
+        count = limit
+    )
+    if clanName:
+        response.headers["namePrefix"] = clanName
+    else:
+        del response.headers["namePrefix"]
+    if clanTag:
+        response.headers["tagPrefix"] = clanTag
+    else:
+        del response.headers["tagPrefix"]
 
-    response = request.send()
+    response = await response.send()
+    if isinstance(response["clan"], dict):
+        response["clan"] = [response["clan"],]
+    
+    return response["clan"]
 
-    return JSONResponse(response["clan"])
-
-@router.get("/search/leaderboard/{clanId}", summary="")
-def get_clan_placement(clanId: Annotated[int, Path(title="Clan's ID to look up")]):
-    request = get_request("clan_get_leaderboard")
-    request.headers["clanId"] = clanId
-    response = request.send()
-
-    return JSONResponse(response)
-
-@router.get("/search/leaderboard/", summary="")
-def get_clan_placement(
-    start: Annotated[int, Query(title="Start placement", ge=0)] = 0,
-    count: Annotated[int, Query(title="How many to get", gt=1)] = 20
+@router.post(
+    "/{clanId}/",
+    summary="Gets data about the given squadron"
+)
+async def get_clan(
+    token: TokenString,
+    clanId: Annotated[int, Path(title="The squadron's ID")]
 ):
-    request = get_request("clan_get_leaderboard")
-    request.headers["start"] = start
-    request.headers["count"] = count
+    data = await (
+        await get_request(
+            token,
+            "clan_get",
+            clanId=clanId
+        )
+    ).send()
 
-    response = request.send()
+    candidates = data.get("candidates")
+    if isinstance(candidates, dict):
+        data["candidates"] = [candidates]
 
-    return JSONResponse(response)
-
-@router.post("/{clanId}/apply")
-def apply_to_clan(
-    session_token: Annotated[str, Form(title="The session token to the account")],
-    clanId: Annotated[int, Path(title="The clan ID", gt=0)]
-) -> bool:
-    data = get_cached_entry(session_token)
-    request = get_request("clan_membership_request")
-    request["_id"] = clanId
-
-    request.send(token_override=session_token, uid=data["uid"])
-    return True
-
-@router.post("/{clanId}/dismiss/{userId}", summary="Dismiss member")
-def clan_dismiss_member(
-    session_token: Annotated[str, Form(title="The session token to the account")],
-    clanId: Annotated[int, Path(title="The squadron's ID")],
-    userId: Annotated[int, Path(title="The user's ID to be kicked")],
-    comment: Annotated[str, Form(title="The message to send alongside the kick")] = ""
-):
-    data = get_cached_entry(session_token)
-    terse = get_terse(data["uid"])
-    if terse["clanid"] != clanId:
-        raise HTTPException(403, detail="Incorrect guild ID given")
-    request = get_request("clan_dismiss_member")
-    request.headers["userid"] = userId
-    request["comment"] = comment
-
-    request.send(token_override=session_token, uid=data["uid"])
-    return
+    return data

@@ -1,16 +1,16 @@
 from typing_extensions import Annotated
 from typing import Literal, Any
-from fastapi import APIRouter, Query, Form, Path
+from fastapi import APIRouter, Query, Form, Path, HTTPException
 from fastapi.responses import JSONResponse
-from .shared import get_request, token_cache, get_cached_entry
-from requests import get as requests_get
-from utils.auth import login, __refresh_token
+from utils.auth import users_cache
 from utils.replayParser import Replay
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 from pydantic import EmailStr
 from bs4 import BeautifulSoup, Tag
 from enum import IntEnum
-from .models import LoginResponse, NewsResponse, LoginFail2FAResponse, ReplayDataModel, ReplayNotFoundModel
+from api.models import NewsResponse, LoginResponse, LoginFail2FAResponse, ReplayDataModel, ReplayNotFoundModel
+from api.shared import TokenString 
+from utils.helper import dtToTimestamp
 
 router = APIRouter(
 	tags=["general"],
@@ -19,57 +19,58 @@ router = APIRouter(
 
 @router.post(
 	"/login", 
-	summary="Get token from War Thunder directly", 
+	summary="Get a token to use in other endpoints", 
 	description="You can use this token for the `POST` endpoints, which are user-specific. If given user has 2FA enabled, they must provide the 2FA code along with their credentials. If you generated a token that hasn't expired yet, the endpoint will just give back the cached token.",
 	responses={
-		200: {"model": LoginResponse, "description": "Success - Cached data"},
-		201: {"model": LoginResponse, "description": "Success - Newly fetched data"},
-		401: {"model": LoginFail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."}
+		200: {"model": LoginResponse},
+		403: {"model": LoginFail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."}
 	}
 )
-def login_post(
+async def login_post(
 	email: Annotated[EmailStr, Form()],
-	password: Annotated[str, Form(min_length=6, max_length=64)],
-	two_factor_code: Annotated[int, Form(ge=100000, le=999999)] = None
+	password: Annotated[str, Form(min_length=6, max_length=64)]
 ):
-	for _email, data in dict(token_cache).items():
-		if datetime.now(UTC) >= datetime.fromtimestamp(token_cache[_email]["expires"], UTC):
-			token_cache.pop(_email)
-	if email in token_cache:
-		_ = token_cache[email]
-		_["status"] = "OK"
-		return JSONResponse(_, status_code=200)
-	code, data = login(email, password, two_factor_code)
-	if code == 401:
-		return JSONResponse(data, status_code=401)
-	token_cache[email] = {
-		"session_token": data["jwt"],
-		"user_token": data["token"],
-		"expires": round((datetime.now(UTC) + timedelta(seconds=data["expires"])).timestamp(), 0),
-		"uidHint": data["uid"],
-		"status": "OK"
-	}
-	return JSONResponse(token_cache[email], status_code=code)
+	token = await users_cache.login(email, password)
+
+	return JSONResponse({
+		"status": "OK",
+		"token": token
+	}, status_code=200)
 
 @router.post(
 	"/refresh-token", 
-	summary="Refresh your token so it stays alive for longer.",
-	description="If you are cached it will refresh the token. The game generally refreshes the token every 30 minutes."
+	summary="Refresh your token so it stays alive for longer. This is essentially a 'No op', just to keep the token active.",
+	description="If you are cached it will refresh the token. The game generally refreshes the token every 30 minutes. Returns an UNIX timestamp of the new token expiry"
 )
-def login_token(
-	user_token: Annotated[str, Form()]
-) -> None|LoginResponse:
-	email = get_cached_entry(user_token)["email"]
-	data = __refresh_token(token_cache[email])
-	token_cache[email]["expires"] = round((datetime.now(UTC) + timedelta(seconds=data["expires"])).timestamp(), 0) 
-	return token_cache[email]
+async def login_token(token: TokenString) -> int:
+	entry = await users_cache.get(token)
+	await entry.refresh()
+	return dtToTimestamp(entry.expires)
+
+@router.post(
+	"/answer-2fa"
+)
+async def answer_2fa(
+	email: EmailStr,
+	code: Annotated[int, Form(title="The 2FA code")]
+):
+	if email not in users_cache:
+		raise HTTPException(401, "You are not pending ")
+	users_cache.__pending_2fa[email]["code"] = code
+	... # TODO: Implement
+
 @router.get("/latestGameVersion", summary="Get latest game version")
-def get_latest_game_ver(
+async def get_latest_game_ver(
 	branch: Annotated[Literal["dev", "dev-stable"], Query(title="The game version to get")] = None
 ) -> str:
 	if branch is None: branch = ""
-	_ = requests_get(f"https://yupmaster.gaijinent.com/yuitem/get_version.php?proj=warthunder&tag={branch}")
-	return _.text 
+	session = await users_cache._enter_op()
+	try:
+		_ = await session.get(f"https://yupmaster.gaijinent.com/yuitem/get_version.php?proj=warthunder&tag={branch}")
+		_ = await _.text()
+	finally:
+		await users_cache._exit_op()
+	return _
 
 #region /v1/news
 class NewsObj:
@@ -207,20 +208,33 @@ class NewsObj:
 		}
 
 @router.get("/news", summary="Gets the latest news from gaijin", description="Puts the pinned news first (Current update changelog + latest big news)")
-def get_news() -> list[NewsResponse]:
-	r1 = requests_get("http://newslist.gaijin.net:8080/news/warthunder/en/js")
+async def get_news() -> list[NewsResponse]:
+	session = await users_cache._enter_op() 
+	r1 = await session.get("http://newslist.gaijin.net:8080/news/warthunder/en/js")
 	r1_news:list[NewsObj] = []
 	for news in r1.json()["items"]:
 		r1_news.append(NewsObj(news))
 
-	r2 = requests_get("https://warthunder.com/en/game/changelog/")
-	changelogs = BeautifulSoup(r2.text, 'html.parser').select("div.showcase__content-wrapper>div.showcase__item.widget")
+	r2 = await session.get("https://warthunder.com/en/game/changelog/")
+	changelogs = BeautifulSoup(r2.text(), 'html.parser').select("div.showcase__content-wrapper>div.showcase__item.widget")
+	await users_cache._exit_op()
 	r2_news:list[NewsObj] = []
 	for news in changelogs:
 		r2_news.append(NewsObj.from_changelog(news))
 
-	pinned:list[NewsObj] = [i for i in r1_news if i.pinned] + [i for i in r2_news if i.pinned]
-	unpinned:list[NewsObj] = [i for i in r1_news if not i.pinned] + [i for i in r2_news if not i.pinned]
+	pinned:list[NewsObj] = []
+	unpinned:list[NewsObj] = []
+	for news in r1_news:
+		if news.pinned:
+			pinned.append(news)
+		else:
+			unpinned.append(news)
+	for news in r2_news:
+		if news.pinned:
+			pinned.append(news)
+		else:
+			unpinned.append(news)
+
 	pinned.sort(key=lambda x: x.created, reverse=True)
 	unpinned.sort(key=lambda x: x.created, reverse=True)
 	combined = pinned + unpinned
@@ -234,12 +248,13 @@ def get_news() -> list[NewsResponse]:
 		200: {"model": ReplayDataModel},
 		404: {"model": ReplayNotFoundModel, "description": "Replay not found"}
 	})
-def get_replay(replayId: Annotated[
-	str, 
-	Path(
-		title="The replay's ID to get",
-		pattern=r"^#?[0-9a-fA-F]{1,16}$",
-		description="Must be given in HEX format"
-	)
+async def get_replay(
+	replayId: Annotated[
+		str, 
+		Path(
+			title="The replay's ID to get",
+			pattern=r"^#?[0-9a-fA-F]{1,16}$",
+			description="Must be given in HEX format"
+		)
 ]):
-	return Replay(replayId)
+	return await Replay.get(replayId)

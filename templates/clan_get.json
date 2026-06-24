@@ -1,0 +1,7 @@
+{
+    "auth": true,
+    "headers": {
+        "action":"cln_clan_get",
+        "clanId":"<replace>"
+    }
+}

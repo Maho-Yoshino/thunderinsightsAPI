@@ -1,0 +1,12 @@
+{
+    "auth": true,
+    "format": "blk",
+    "headers": {
+        "action":"ano_clan_accept_membership_request",
+        "userId": "<replace>"
+    },
+    "body": {
+        "_id": "<replace>",
+        "role": 3
+    }
+}
