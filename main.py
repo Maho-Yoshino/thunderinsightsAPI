@@ -14,6 +14,8 @@ from api import users_router
 from api import clans_router, general_router 
 
 logger = logging.getLogger()
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 tags_metadata = [
 	{
