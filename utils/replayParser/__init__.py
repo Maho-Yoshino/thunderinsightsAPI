@@ -25,23 +25,42 @@ class Replay(dict):
 		async def get_data():
 			async with ClientSession() as session:
 				wrpl_num = 0
-				prev_resp = None
+				wait_time = 1
 				while True:
 					url = f"https://wt-replays-cdnnow.cdn.gaijin.net/{replay_id}/{wrpl_num:04d}.wrpl"
-					async with session.get(url) as r:
+					async with session.head(url) as r:
 						if r.status == 429:
-							await sleep(1)
+							if wait_time == 60:
+								raise HTTPException(429, detail="Replay server rate limit exceeded. Please try again later.")
+							await sleep(wait_time)
+							wait_time = min(wait_time * 2, 60) # Exponential backoff, max 60 seconds
 							continue
+						wait_time = 1 # Reset wait time on successful request
 						if r.status == 404:
-							if prev_resp is None:
+							if wrpl_num == 0:
 								raise HTTPException(404, detail="Replay could not be found")
-							return ReplayParser(prev_resp)
+							wrpl_num -= 1
+							break
 
 						if r.status >= 400:
 							raise HTTPException(500, detail="Replay server gave an error")
 
-						prev_resp = await r.read()
 						wrpl_num += 1
+				while True:
+					async with session.get(f"https://wt-replays-cdnnow.cdn.gaijin.net/{replay_id}/{wrpl_num:04d}.wrpl") as r:
+						if r.status == 429:
+							if wait_time == 60:
+								raise HTTPException(429, detail="Replay server rate limit exceeded. Please try again later.")
+
+							await sleep(wait_time)
+							wait_time = min(wait_time * 2, 60) # Exponential backoff, max 60 seconds
+							continue
+
+						if r.status >= 400:
+							raise HTTPException(500, detail="Replay server gave an error")
+
+						data = await r.read()
+						return ReplayParser(data)
 
 		#endregion
 		#region Parse gaijin JSON to proper JSON
