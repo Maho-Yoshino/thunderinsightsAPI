@@ -91,8 +91,8 @@ class UserTokenCache:
 		async def refresh(self):
 			if datetime.now(UTC) > self.expires:
 				raise AuthenticationError(401, "Login expired. Please reauthenticate.")
-			session = await self.__parent._enter_op()
-			try:
+
+			async with self.__parent.operation() as session:
 				async with session.post(
 					"https://auth.gaijinent.com/login_token.php", 
 					data={"token": self.user_token}, 
@@ -102,8 +102,6 @@ class UserTokenCache:
 					}
 				) as r:
 					content = await self.__parent._handle_response(r)
-			finally:
-				await self.__parent._exit_op()
 
 			if content.get("status") == "LOGINERROR":
 				if content.get("error") == "Wrong token":
@@ -220,8 +218,8 @@ class UserTokenCache:
 			"game": "wt",
 			"client": client_id
 		}
-		session = await self._enter_op()
-		try:
+		
+		async with self.operation() as session:
 			async with session.post(
 				"https://auth.gaijinent.com/login.php", 
 				data=logindata, 
@@ -274,8 +272,10 @@ class UserTokenCache:
 								"Request": self.__pending_2fa[email]["requestId"]
 							}
 							success = True
+
 				if not success:
 					raise AuthenticationError(403, "Could not get 2FA login in time")
+
 				async with session.post(
 					"https://auth.gaijinent.com/login.php",
 					data={
@@ -296,8 +296,7 @@ class UserTokenCache:
 				if data["status"] == "2STEPERROR":
 					self.__pending_2fa.pop(email, None)
 					raise AuthenticationError(403, "Invalid 2FA code provided.")
-		finally:
-			await self._exit_op()
+
 		if data["status"] == "LOGINERROR":
 			raise HTTPException(400, f"Login failed: {data["error"]}")
 		async with self._transaction() as cur:
@@ -344,6 +343,13 @@ class UserTokenCache:
 	def _hash_token(self, raw_token:str) -> str:
 		return sha256(raw_token.encode()).hexdigest()
 
+	@asynccontextmanager
+	async def operation(self):
+		session = await self._enter_op()
+		try:
+			yield session
+		finally:
+			await self._exit_op()
 	@asynccontextmanager
 	async def _transaction(self):
 		con = await connect(self.__db_path)

@@ -129,15 +129,10 @@ class Request(dict):
 				kwargs["headers"]["compr"] = compr
 		kwargs["headers"]["token"] = self.login.session_token
 		kwargs["headers"]["uidHint"] = str(self.login.uidHint)
-		session = await users_cache._enter_op()
-		try:
+
+		async with self.login.__parent.operation() as session:
 			resp = await session.post(url, **kwargs)
 			await self._decode(resp)
-		except Exception:
-			_logger.exception("An exception occurred while sending a request to gaijin")
-			raise
-		finally:
-			await users_cache._exit_op()
 
 		return self.result
 

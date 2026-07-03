@@ -2,6 +2,7 @@ import logging, asyncio
 from logging.handlers import TimedRotatingFileHandler
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from uvicorn import run as uvicorn_run
 from os import getenv, chdir, path
@@ -64,6 +65,24 @@ app.include_router(general_router.router, prefix="/v1")
 #app.include_router(units_router.router, prefix="/v1")
 app.include_router(users_router.router, prefix="/v1")
 
+def custom_openapi():
+	if app.openapi_schema:
+		return app.openapi_schema
+	openapi_schema = get_openapi(
+		title=app.title,
+		version=app.version,
+		description=app.description,
+		routes=app.routes,
+		tags=app.openapi_tags,
+	)
+	for path in openapi_schema["paths"].values():
+		for method in path.values():
+			method["responses"].pop("422", None)
+	app.openapi_schema = openapi_schema
+	return app.openapi_schema
+
+app.openapi = custom_openapi
+
 def main():
 
 	debug:bool
@@ -99,7 +118,7 @@ def main():
 	logger.info("Starting up")
 	try:
 		uvicorn_run(app, host=getenv("HOST", "127.0.0.1"), port=int(getenv("PORT", "8001")))
-	except:
+	except Exception:
 		logger.exception("An uncaught error occurred during runtime")
 	finally:
 		logger.info("Shutting down")

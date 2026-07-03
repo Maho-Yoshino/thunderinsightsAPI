@@ -1,11 +1,11 @@
 from logging import getLogger
-from typing import Any
+from typing import Any, Literal
 from typing_extensions import Annotated
 from fastapi import APIRouter, Path, Query, Form, HTTPException
 from fastapi.responses import JSONResponse
 from api.shared import get_request, TokenString
 from api.users_router import get_terse
-from api.models import ClanActions, ClanRoles, ClanLogsModel, ClanEntry, ClanRolesDisplay
+from api.models import Clans
 from utils.auth import users_cache
 
 _logger = getLogger(__name__)
@@ -55,7 +55,7 @@ async def send_application(
 async def get_applicants(
     token: TokenString,
     clanId: squadronId
-):
+) -> list[Clans.ApplicantModel]:
     clanData = await get_clan(token, clanId)
     data = []
     candidates = clanData.get("candidates")
@@ -63,13 +63,13 @@ async def get_applicants(
         return []
     if isinstance(candidates, dict):
         return [
-            {
-                "uid": candidates["uid"],
-                "nickname": candidates["nick"],
-                "timestamp": candidates["date"],
-                "comment": candidates["comments"],
-                "ip": candidates["ip"]
-            }
+            Clans.ApplicantModel(
+                uid=candidates["uid"],
+                nickname=candidates["nick"],
+                timestamp=candidates["date"],
+                comment=candidates["comments"],
+                ip=candidates["ip"]
+            )
         ]
     for entry in clanData.get("candidates"):
         data.append({
@@ -81,22 +81,43 @@ async def get_applicants(
         })
     return data
 @router.post(
-    "/accept/{userId}"
+    "/accept/{userId}",
+    responses={
+        200: {
+            "description": "Successfully accepted the applicant",
+            "content": {}
+        },
+        403: {
+            "description": "You do not have permission to accept applicants",
+            "content": {}
+        },
+        404: {
+            "description": "The given user is not an applicant",
+            "content": {}
+        }
+    }
 )
 async def accept_applicant(
     token: TokenString,
     userId: gaijinUserId
-): 
-    response = await (await get_request(
-        token, 
-        "clan_accept_membership_request",
-        userId=userId,
-        body={
-            "_id": await tokenSquadronId(token)
-        }
-    )).send()
-    return response
-    ... # TODO: Implement
+) -> dict[Literal["status"], Literal["success"]]: 
+    try:
+        response = await (await get_request(
+            token, 
+            "clan_accept_membership_request",
+            userId=userId,
+            body={
+                "_id": await tokenSquadronId(token)
+            }
+        )).send()
+        return response
+    except HTTPException as e:
+        if e.detail == "b'!ERROR:CLAN_YOU_HAVE_NO_RIGHT'":
+            raise HTTPException(403, "You do not have permission to accept applicants.")
+        if e.detail == "b'!ERROR:CLAN_USER_IS_NOT_CANDIDATE'":
+            raise HTTPException(404, "The given user is not an applicant.")
+        _logger.exception("An exception occurred in accept applicant endpoint")
+        raise
 
 @router.post(
     "/reject/{userId}"
@@ -125,9 +146,9 @@ async def reject_applicant(
 async def change_role(
     token: TokenString,
     userId: gaijinUserId,
-    role: Annotated[ClanRolesDisplay, Query(title="The role to assign")]
+    role: Annotated[Clans.RolesDisplay, Query(title="The role to assign")]
 ): 
-    role = ClanRoles[role.name]
+    role = Clans.Roles[role.name]
     return await (await get_request(
         token, 
         "clan_change_member_role",
@@ -178,7 +199,7 @@ async def get_clan_logs(
     token: TokenString,
     limit: Annotated[int, Query(title="The max ammount to get at once", gt=0, le=50)] = 10,
     fromEntry: Annotated[str, Query(title="The last call's 'lastLog' value to begin searching from")] = None
-) -> ClanLogsModel:
+) -> Clans.LogsModel:
     allLogs = (await tokenSquadronId(token)) == clanId
     try:
         response = await get_request(
@@ -205,7 +226,7 @@ async def get_clan_logs(
     logs:list[dict[str, int|str]] = []
     for item in response["log"]:
         item:dict[str, int|str]
-        action = ClanActions[item["ev"]]
+        action = Clans.Actions[item["ev"]]
         logEntry = {
             "timestamp": item["time"],
             "action": {
@@ -224,18 +245,18 @@ async def get_clan_logs(
                 "nickname": item["nick"],
             }
         match action:
-            case ClanActions.role:
+            case Clans.Actions.role:
                 logEntry.update({
                     "roleChange": {
                         "old": item["old"],
                         "new": item["new"]
                     }
                 })
-            case ClanActions.info:
+            case Clans.Actions.info:
                 for i in ["tag", "desc", "region", "status"]: 
                     if (_ := item.get(i)):
                         logEntry[i] = _
-            case ClanActions.create:
+            case Clans.Actions.create:
                 logEntry["info"] = {}
                 for i in ["type", "name", "tag", "slogan", "desc", "region", "announcement"]:
                     logEntry["info"][i] = item[i]
@@ -252,7 +273,7 @@ async def get_clan_search(
     clanName: Annotated[str, Query(title="Squadron name to look up")] = None,
     clanTag: Annotated[str, Query(title="Squadron tag to look up")] = None,
     limit: Annotated[int, Query(title="Amount of squadrons to return", gt=0, lt=50)] = 10
-) -> list[ClanEntry]:
+) -> list[Clans.ClanModel]:
     if clanName is None and clanTag is None:
         raise HTTPException(400, "You must provide either a clanName or clanTag")
     response = await get_request(

@@ -9,10 +9,8 @@ from datetime import datetime, UTC
 from pydantic import EmailStr
 from bs4 import BeautifulSoup, Tag
 from enum import IntEnum
-from api.models import NewsResponse, LoginResponse, LoginFail2FAResponse, ReplayDataModel, ReplayNotFoundModel
-from api.shared import TokenString 
-from utils.helper import dtToTimestamp
-from api.shared import TokenString, RateLimitExceeded
+from api.models import General
+from api.shared import IpString, TokenString, RateLimitExceeded
 from utils.helper import dtToTimestamp, RateLimitParse
 
 router = APIRouter(
@@ -58,12 +56,17 @@ async def login_post(
 	"/refresh-token", 
 	summary="Refresh your token so it stays alive for longer. This is essentially a 'No op', just to keep the token active.",
 	description="If you are cached it will refresh the token. The game generally refreshes the token every 30 minutes. Returns an UNIX timestamp of the new token expiry",
+	responses={
+		200: {"model": General.LoginToken.LoginTokenResponse, "description": "Token refreshed successfully"},
+		404: {"model": General.LoginToken.LoginFailResponse, "description": "Invalid token provided. The token is either expired or invalid."},
+		429: {"model": General.RateLimitModel, "description": "Rate limit exceeded. Please wait a bit before trying again."}
+	}
 )
 async def login_token(request: Request, token: TokenString):
 	_check_rate_limit(request)
 	entry = await users_cache.get(token)
 	if entry is None:
-		return JSONResponse(status_code=401, content={"status": "FAIL", "detail": "Invalid token provided"})
+		return JSONResponse(status_code=404, content={"status": "FAIL", "detail": "Invalid token provided"})
 	await entry.refresh()
 	return {
 		"expires": dtToTimestamp(entry.expires),
@@ -85,14 +88,11 @@ async def answer_2fa(
 @router.get("/latestGameVersion", summary="Get latest game version")
 async def get_latest_game_ver(
 	branch: Annotated[Literal["dev", "dev-stable"], Query(title="The game version to get")] = None
-) -> str:
+) -> IpString:
 	if branch is None: branch = ""
-	session = await users_cache._enter_op()
-	try:
+	async with users_cache.operation() as session:
 		_ = await session.get(f"https://yupmaster.gaijinent.com/yuitem/get_version.php?proj=warthunder&tag={branch}")
 		_ = await _.text()
-	finally:
-		await users_cache._exit_op()
 	return _
 
 #region /v1/news
@@ -231,19 +231,18 @@ class NewsObj:
 		}
 
 @router.get("/news", summary="Gets the latest news from gaijin", description="Puts the pinned news first (Current update changelog + latest big news)")
-async def get_news() -> list[NewsResponse]:
-	session = await users_cache._enter_op() 
-	r1 = await session.get("http://newslist.gaijin.net:8080/news/warthunder/en/js")
-	r1_news:list[NewsObj] = []
-	for news in r1.json()["items"]:
-		r1_news.append(NewsObj(news))
+async def get_news() -> list[General.News.NewsResponseModel]:
+	async with users_cache.operation() as session:
+		r1 = await session.get("http://newslist.gaijin.net:8080/news/warthunder/en/js")
+		r1_news:list[NewsObj] = []
+		for news in r1.json()["items"]:
+			r1_news.append(NewsObj(news))
 
-	r2 = await session.get("https://warthunder.com/en/game/changelog/")
-	changelogs = BeautifulSoup(r2.text(), 'html.parser').select("div.showcase__content-wrapper>div.showcase__item.widget")
-	await users_cache._exit_op()
-	r2_news:list[NewsObj] = []
-	for news in changelogs:
-		r2_news.append(NewsObj.from_changelog(news))
+		r2 = await session.get("https://warthunder.com/en/game/changelog/")
+		changelogs = BeautifulSoup(r2.text(), 'html.parser').select("div.showcase__content-wrapper>div.showcase__item.widget")
+		r2_news:list[NewsObj] = []
+		for news in changelogs:
+			r2_news.append(NewsObj.from_changelog(news))
 
 	pinned:list[NewsObj] = []
 	unpinned:list[NewsObj] = []
@@ -268,8 +267,8 @@ async def get_news() -> list[NewsResponse]:
 	"/replay/{replayId}", 
 	summary="Gets data from a specified replay",
 	responses={
-		200: {"model": ReplayDataModel},
-		404: {"model": ReplayNotFoundModel, "description": "Replay not found"}
+		200: {"model": General.Replay.DataModel},
+		404: {"model": General.Replay.ReplayNotFoundModel, "description": "Replay not found"}
 	})
 async def get_replay(
 	replayId: Annotated[
