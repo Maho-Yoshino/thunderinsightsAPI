@@ -2,12 +2,14 @@ import logging, asyncio
 from logging.handlers import TimedRotatingFileHandler
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from uvicorn import run as uvicorn_run
 from os import getenv, chdir, path
 from pathlib import Path
 from contextlib import asynccontextmanager
-from utils.auth import users_cache
 
+from utils.auth import users_cache
+from api.shared import RateLimitExceeded
 from api import users_router
 from api import clans_router, general_router 
 
@@ -47,6 +49,13 @@ app = FastAPI(
 	openapi_tags=tags_metadata,
 	swagger_ui_parameters={"defaultModelsExpandDepth": -1},
 	lifespan=lifespan
+)
+app.add_exception_handler(
+	RateLimitExceeded, 
+	lambda request, exc: (
+		logging.warning(f"Rate limit exceeded for {request.client.host}"), 
+		JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
+	)[1]
 )
 app.include_router(clans_router.router, prefix="/v1")
 app.include_router(general_router.router, prefix="/v1")

@@ -1,6 +1,7 @@
+from os import getenv
 from typing_extensions import Annotated
 from typing import Literal, Any
-from fastapi import APIRouter, Query, Form, Path, HTTPException
+from fastapi import APIRouter, Query, Form, Path, HTTPException, Request
 from fastapi.responses import JSONResponse
 from utils.auth import users_cache
 from utils.replayParser import Replay
@@ -11,25 +12,41 @@ from enum import IntEnum
 from api.models import NewsResponse, LoginResponse, LoginFail2FAResponse, ReplayDataModel, ReplayNotFoundModel
 from api.shared import TokenString 
 from utils.helper import dtToTimestamp
+from api.shared import TokenString, RateLimitExceeded
+from utils.helper import dtToTimestamp, RateLimitParse
 
 router = APIRouter(
 	tags=["general"],
 	responses={404: {"description": "Not found"}}
 )
+_login_rate_limits:dict[str, list[datetime]] = {}
+
+def _check_rate_limit(request: Request) -> None:
+	rate_limit = RateLimitParse(getenv("LOGIN_RATE_LIMIT", "2/minute"))
+	global _login_rate_limits
+	_login_rate_limits = {k:v for k,v in _login_rate_limits.items() if v and (datetime.now(UTC) - v[-1]) < rate_limit[1]} # Clean up old entries
+	_login_rate_limits.setdefault(request.client.host, [])
+
+	if len(_login_rate_limits[request.client.host]) >= rate_limit[0]:
+		raise RateLimitExceeded()
+	_login_rate_limits[request.client.host].append(datetime.now(UTC))
 
 @router.post(
 	"/login", 
 	summary="Get a token to use in other endpoints", 
 	description="You can use this token for the `POST` endpoints, which are user-specific. If given user has 2FA enabled, they must provide the 2FA code along with their credentials. If you generated a token that hasn't expired yet, the endpoint will just give back the cached token.",
 	responses={
-		200: {"model": LoginResponse},
-		403: {"model": LoginFail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."}
+		200: {"model": General.Login.LoginResponse},
+		403: {"model": General.Login.Fail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."},
+		429: {"model": General.RateLimitModel, "description": "Rate limit exceeded. Please wait a bit before trying again."},
 	}
 )
 async def login_post(
+	request: Request,
 	email: Annotated[EmailStr, Form()],
-	password: Annotated[str, Form(min_length=6, max_length=64)]
+	password: Annotated[str, Form(min_length=6, max_length=64, json_schema_extra={"format": "password"})]
 ):
+	_check_rate_limit(request)
 	token = await users_cache.login(email, password)
 
 	return JSONResponse({
@@ -40,12 +57,18 @@ async def login_post(
 @router.post(
 	"/refresh-token", 
 	summary="Refresh your token so it stays alive for longer. This is essentially a 'No op', just to keep the token active.",
-	description="If you are cached it will refresh the token. The game generally refreshes the token every 30 minutes. Returns an UNIX timestamp of the new token expiry"
+	description="If you are cached it will refresh the token. The game generally refreshes the token every 30 minutes. Returns an UNIX timestamp of the new token expiry",
 )
-async def login_token(token: TokenString) -> int:
+async def login_token(request: Request, token: TokenString):
+	_check_rate_limit(request)
 	entry = await users_cache.get(token)
+	if entry is None:
+		return JSONResponse(status_code=401, content={"status": "FAIL", "detail": "Invalid token provided"})
 	await entry.refresh()
-	return dtToTimestamp(entry.expires)
+	return {
+		"expires": dtToTimestamp(entry.expires),
+		"status": "OK"
+	}
 
 @router.post(
 	"/answer-2fa"
@@ -55,7 +78,7 @@ async def answer_2fa(
 	code: Annotated[int, Form(title="The 2FA code")]
 ):
 	if email not in users_cache:
-		raise HTTPException(401, "You are not pending ")
+		raise HTTPException(401, "You are not pending 2FA verification. Please try to log in first.")
 	users_cache.__pending_2fa[email]["code"] = code
 	... # TODO: Implement
 
