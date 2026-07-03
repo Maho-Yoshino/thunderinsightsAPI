@@ -50,30 +50,17 @@ class TwoFactorRequired(AuthenticationError):
 
 class UserTokenCache:
 	scheduler: AsyncIOScheduler
-	class dbSchema:
-		TOKENS = "tokens"
-		EXPIRED_TOKENS = "expired_tokens"
-		TWO_FACTOR_TOKENS = "two_factor_tokens"
-		class Tokens(StrEnum):			
-			HASH = "hash_token"
-			EMAIL = "email"
-			SESSION_TOKEN = "session_token"
-			USER_TOKEN = "user_token"
-			EXPIRES = "expires"
-			UID = "uidHint"
-			REQUESTS_CNT = "requests_count"
-			LAST_USED = "last_used"
-			CREATED = "created_at"
-		class ExpiredTokens(StrEnum):
-			HASH = "hash_token"
-			EMAIL = "email"
-			REQUESTS_CNT = "requests_count"
-			LAST_USED = "last_used"
-			EXPIRED_AT = "expired_at"
-		class TwoFactorTokens(StrEnum):
-			EMAIL = "email"
-			CLIENT_ID = "client_id"
-			TRUSTED_AT = "trusted_at"
+	class dbSchema(StrEnum):
+		TABLE = "tokens"
+		HASH = "hash_token"
+		EMAIL = "email"
+		SESSION_TOKEN = "session_token"
+		USER_TOKEN = "user_token"
+		EXPIRES = "expires"
+		UID = "uidHint"
+		REQUESTS_CNT = "requests_count"
+		LAST_USED = "last_used"
+		CREATED = "created_at"
 
 	class Entry: # Short lived data class with some helper methods
 		hashed: str
@@ -88,7 +75,7 @@ class UserTokenCache:
 		__saved:dict[str, str|int|datetime] # Saved to file state, used for comparing what to change
 	
 		def __init__(self, row:Row, parent:'UserTokenCache'):
-			p = UserTokenCache.dbSchema.Tokens
+			p = UserTokenCache.dbSchema
 			self.hashed = str(row[p.HASH])
 			self.session_token = str(row[p.SESSION_TOKEN])
 			self.user_token = str(row[p.USER_TOKEN])
@@ -164,19 +151,19 @@ class UserTokenCache:
 			async with self.__parent._transaction() as cur:
 				p = self.__parent.dbSchema
 				await cur.execute(f"""
-					UPDATE {p.TOKENS} 
+					UPDATE {p.TABLE} 
 					SET {", ".join([f"{k} = ?" for k in changed.keys()])}
-					WHERE {p.Tokens.EMAIL} = ?
+					WHERE {p.EMAIL} = ?
 				""",
 				(
 					*changed.values(),
-					self.__saved[p.Tokens.EMAIL]
+					self.__saved[p.EMAIL]
 				))
 
 			self.__saved = self.to_json()
 		
 		def to_json(self) -> dict[str, str|int|datetime]:
-			p = self.__parent.dbSchema.Tokens
+			p = self.__parent.dbSchema
 			return {
 				p.HASH: self.hashed,
 				p.SESSION_TOKEN: self.session_token,
@@ -209,17 +196,19 @@ class UserTokenCache:
 		_logger.debug("User Token Cache initialized")
 
 	async def get(self, token:str):
+		schema = self.dbSchema
 		hash = self._hash_token(token)
 		async with self._transaction() as cur:
-			row = await (await cur.execute(f"SELECT * FROM {self.dbSchema.TOKENS} WHERE {self.dbSchema.Tokens.HASH} = ? AND {self.dbSchema.Tokens.EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
+			row = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.HASH} = ? AND {schema.EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
 			if row:
-				await cur.execute(f"UPDATE {self.dbSchema.TOKENS} SET {self.dbSchema.Tokens.REQUESTS_CNT} = {self.dbSchema.Tokens.REQUESTS_CNT} + 1, {self.dbSchema.Tokens.LAST_USED} = strftime('%s', 'now') WHERE {self.dbSchema.Tokens.HASH} = ?", (hash,))
+				await cur.execute(f"UPDATE {schema.TABLE} SET {schema.REQUESTS_CNT} = {schema.REQUESTS_CNT} + 1, {schema.LAST_USED} = strftime('%s', 'now') WHERE {schema.HASH} = ?", (hash,))
 				return self.Entry(row, self)
 			return None
 	async def exists(self, token:str) -> bool:
+		schema = self.dbSchema
 		hash = self._hash_token(token)
 		async with self._transaction() as cur:
-			row = await (await cur.execute(f"SELECT 1 FROM {self.dbSchema.TOKENS} WHERE {self.dbSchema.Tokens.HASH} = ? AND {self.dbSchema.Tokens.EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
+			row = await (await cur.execute(f"SELECT 1 FROM {schema.TABLE} WHERE {schema.HASH} = ? AND {schema.EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
 			return row is not None
 	
 	async def login(self, email:str, password:str|None = None):
@@ -312,19 +301,19 @@ class UserTokenCache:
 		if data["status"] == "LOGINERROR":
 			raise HTTPException(400, f"Login failed: {data["error"]}")
 		async with self._transaction() as cur:
-			_ = self.dbSchema.Tokens
+			schema = self.dbSchema
 			raw, hash = self._generate_hash()
 			rn_timestamp = round(datetime.now(UTC).timestamp())
-			if await (await cur.execute(f"SELECT 1 FROM {self.dbSchema.TOKENS} WHERE {_.EMAIL} = ?", (email,))).fetchone() is not None:
-				_logger.info(f"Overwriting old entry for {email}")
+			if await (await cur.execute(f"SELECT 1 FROM {schema.TABLE} WHERE {schema.EMAIL} = ?", (email,))).fetchone() is not None:
+				_logger.info(f"Overwriting old loginentry for {email}")
 				await cur.execute(f"""
-					UPDATE {self.dbSchema.TOKENS} 
-					SET {_.HASH} = ?, {_.SESSION_TOKEN} = ?, {_.USER_TOKEN} = ?, {_.EXPIRES} = ?, {_.UID} = ?, {_.LAST_USED} = ? WHERE {_.EMAIL} = ?""", 
+					UPDATE {schema.TABLE} 
+					SET {schema.HASH} = ?, {schema.SESSION_TOKEN} = ?, {schema.USER_TOKEN} = ?, {schema.EXPIRES} = ?, {schema.UID} = ?, {schema.LAST_USED} = ? WHERE {schema.EMAIL} = ?""", 
 					(hash, data["jwt"], data["token"], rn_timestamp + data["token_exp"], data["user_id"], rn_timestamp, email)
 				)
 			else:
 				await cur.execute(f"""
-					INSERT INTO {self.dbSchema.TOKENS} ({_.HASH}, {_.SESSION_TOKEN}, {_.USER_TOKEN}, {_.EXPIRES}, {_.UID}, {_.EMAIL}, {_.LAST_USED}) 
+					INSERT INTO {schema.TABLE} ({schema.HASH}, {schema.SESSION_TOKEN}, {schema.USER_TOKEN}, {schema.EXPIRES}, {schema.UID}, {schema.EMAIL}, {schema.LAST_USED}) 
 					VALUES ({', '.join(["?" for i in range(7)])})""", 
 					(hash, data["jwt"], data["token"], rn_timestamp + data["token_exp"], data["user_id"], email, rn_timestamp)
 				)		
@@ -332,9 +321,9 @@ class UserTokenCache:
 	# region Helpers
 	async def _refresh(self):
 		self.__pending_2fa = {k:v for k,v in self.__pending_2fa.items() if v["expires"] > round(datetime.now(UTC).timestamp(), 0)}
-		p = self.dbSchema
+		schema = self.dbSchema
 		async with self._transaction() as cur:
-			rows = await (await cur.execute(f"SELECT * FROM {p.TOKENS} WHERE {p.Tokens.EXPIRES} > strftime('%s', 'now')")).fetchall()
+			rows = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.EXPIRES} > strftime('%s', 'now')")).fetchall()
 		for row in rows:
 			entry = self.Entry(row, self)
 			try:
@@ -342,26 +331,12 @@ class UserTokenCache:
 					await entry.refresh()
 			except AuthenticationError:
 				await cur.execute(
-					f"DELETE FROM {p.TOKENS} WHERE {p.Tokens.HASH} = ?", 
+					f"DELETE FROM {schema.TABLE} WHERE {schema.HASH} = ?", 
 					(entry.hashed,)
-				)
-				await cur.execute(
-					f"""
-					INSERT INTO {p.EXPIRED_TOKENS}
-					({p.ExpiredTokens.EMAIL}, {p.ExpiredTokens.EXPIRED_AT}, {p.ExpiredTokens.HASH}, {p.ExpiredTokens.LAST_USED}, {p.ExpiredTokens.REQUESTS_CNT})
-					VALUES (?, ?, ?, ?, ?)
-					""",
-					(
-						entry.email,
-						round(entry.expires.timestamp()),
-						entry.hashed,
-						round(entry.last_used.timestamp()),
-						entry.requests_count
-					)
 				)
 				_logger.info(f"Removed expired entry for {entry.email}")
 		async with self._transaction() as cur:
-			await cur.execute(f"DELETE FROM {p.TOKENS} WHERE {p.Tokens.EXPIRES} <= strftime('%s', 'now')")
+			await cur.execute(f"DELETE FROM {schema.TABLE} WHERE {schema.EXPIRES} <= strftime('%s', 'now')")
 		
 	def _generate_hash(self) -> tuple[str, str]:
 		raw_token = token_urlsafe(32)
