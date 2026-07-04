@@ -61,7 +61,8 @@ async def login_token(
 	}
 
 @router.post(
-	"/answer-2fa"
+	"/answer-2fa",
+	summary="Provide 2FA code to finish login in case of a 2FA account without gaijin pass"
 )
 @limiter.limit(getenv("LOGIN_RATE_LIMIT", "5/minute"))
 async def answer_2fa(

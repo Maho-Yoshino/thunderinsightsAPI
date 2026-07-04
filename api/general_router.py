@@ -16,17 +16,20 @@ router = APIRouter(
 	responses={404: {"description": "Not found"}}
 )
 
+async def getLatestGameVer(branch: Literal["dev", "dev-stable"]|None):
+	if branch is None: branch = ""
+	async with users_cache.operation() as session:
+		_ = await session.get(f"https://yupmaster.gaijinent.com/yuitem/get_version.php?proj=warthunder&tag={branch}")
+		_ = await _.text()
+	return _
+
 @router.get("/latestGameVersion", summary="Get latest game version")
 @limiter.shared_limit("general", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_latest_game_ver(
 	request: Request,
 	branch: Annotated[Literal["dev", "dev-stable"], Query(title="The game version to get")] = None
 ) -> IpString:
-	if branch is None: branch = ""
-	async with users_cache.operation() as session:
-		_ = await session.get(f"https://yupmaster.gaijinent.com/yuitem/get_version.php?proj=warthunder&tag={branch}")
-		_ = await _.text()
-	return _
+	return await getLatestGameVer(branch)
 
 #region /v1/news
 class NewsObj:

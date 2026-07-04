@@ -4,6 +4,11 @@ from .shared import IntString, IpString
 from datetime import datetime
 from enum import Enum
 
+class Base:
+	class SuccessEmptyDict(BaseModel):
+		status:Literal["success"] = "success"
+	class GaijinResponse(BaseModel):
+		detail:str
 class Authentication:
 	class Login: # /v1/login endpoint
 		class LoginResponse(BaseModel):
@@ -14,7 +19,7 @@ class Authentication:
 			status: Literal["2STEP"] = "2STEP"
 			requestId: str = Field(description="The requestId to be used in the 2FA process")
 			userId: int = Field(description="The userId of the account")
-	class LoginToken: # /v1/refresh-token endpoint
+	class LoginToken: # /v1/login-token endpoint
 		class LoginTokenResponse(BaseModel):
 			expires: int = Field(description="UNIX timestamp of the new token expiry")
 			status: Literal["OK"] = "OK"
@@ -171,6 +176,9 @@ class Clans:
 
 		class Config:
 			extra = "allow"
+	class ClanPositionModel(BaseModel):
+		pos: int
+		rating: int
 
 class General:
 	class Replay: # /v1/replay endpoint

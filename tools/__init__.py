@@ -13,7 +13,7 @@ from utils.auth import UserTokenCache
 from templates import TEMPLATES, load as load_template
 from .json_to_blk import json_to_blkx, blkx_to_blk, compress_lz4hc, compress_bzip2, find_binblk
 from .hex_to_json import lz4_decompress_try, bzip_decompress_try
-from .const import Action, UserAction, ServerPool
+from .const import Action, UserAction, ServerPool, GaijinErrorCodes
 from utils.auth import users_cache
 
 _logger = getLogger(__name__)
@@ -133,14 +133,14 @@ class Request(dict):
 		async with users_cache.operation() as session:
 			resp = await session.post(url, **kwargs)
 			await self._decode(resp)
-
+			
 		return self.result
 
 	async def _decode(self, response: ClientResponse) -> None:
 		"""Decode from compressed or raw .blk binary to json."""
 		content = await response.read()
 		if content.startswith(b"!ERROR:"):
-			raise HTTPException(status_code=500, detail=str(content))
+			GaijinErrorCodes.parse(content) # Throws an HTTPException
 		if content.startswith(b"!OK"):
 			self.result = {
 				"status": "success"

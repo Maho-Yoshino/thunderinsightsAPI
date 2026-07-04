@@ -24,6 +24,16 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 ### cln_get_short_user_info_jwt  
 ### cln_upgrade_crew  
 ### cln_clan_get_leaderboard  
+- `POST` request  
+- Request headers  
+	- `shortMode` (`on` or abscent)  
+	- `sortField` (`dr_era5_hist` for Squadron battles)  
+	- `clanId` (To look up a specific squadron, abscent when looking at the actual leaderboard)  
+	- `seasonOrdinalNumber`  
+	- `start` (Index to start from)  
+	- `count` (Amount to get at once)  
+- Response  
+	- `BLK format`  
 ### cln_set_research_clan_unit  
 ### cln_clan_get_log  
 ### cln_set_researchable  

@@ -1,12 +1,12 @@
 from os import getenv
 from logging import getLogger
-from typing import Literal
+from typing import Literal, Any
 from typing_extensions import Annotated
 from fastapi import APIRouter, Path, Query, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from api.shared import get_request, TokenString, limiter
 from api.users_router import get_terse
-from api.models import Clans
+from api.models import Clans, Base
 from utils.auth import users_cache
 
 _logger = getLogger(__name__)
@@ -20,11 +20,44 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
+async def searchClan(token: str, clanName: str | None = None, clanTag: str | None = None, limit: int = 10) -> list[Clans.ClanModel]:
+    response = await get_request(
+        token, 
+        "clan_find_by_prefix"
+    )
+    if clanName is None and clanTag is None: 
+        raise HTTPException(500, "You must provide either a clanName or clanTag")
+    if clanName:
+        response.headers["namePrefix"] = clanName
+    else:
+        del response.headers["namePrefix"]
+    if clanTag:
+        response.headers["tagPrefix"] = clanTag
+    else:
+        del response.headers["tagPrefix"]
+    response = await response.send()
+    if isinstance(response["clan"], dict):
+        response["clan"] = [response["clan"],]
+    return response["clan"]
+async def getClan(token: str, clanId: int) -> dict[str, Any]:
+    data = await (
+        await get_request(
+            token,
+            "clan_get",
+            clanId=clanId
+        )
+    ).send()
+
+    candidates = data.get("candidates")
+    if isinstance(candidates, dict):
+        data["candidates"] = [candidates,]
+
+    return data
 async def tokenSquadronId(token:str) -> int|None:
     if (_ := await users_cache.get(token)) is not None:
         userdata = (await get_terse(token, *(_.uidHint,))).get(str(_.uidHint))
         if userdata.get("clanName") is not None:
-            squadronData = await get_clan_search(token, clanName=userdata["clanName"])
+            squadronData = await searchClan(token, clanName=userdata["clanName"])
             for squadron in squadronData:
                 for member in squadron["members"]:
                     if int(member["uid"]) == _.uidHint:
@@ -61,7 +94,7 @@ async def get_applicants(
     token: TokenString,
     clanId: squadronId
 ) -> list[Clans.ApplicantModel]:
-    clanData = await get_clan(token, clanId)
+    clanData = await getClan(token, clanId)
     data = []
     candidates = clanData.get("candidates")
     if candidates is None:
@@ -89,16 +122,14 @@ async def get_applicants(
     "/accept/{userId}",
     responses={
         200: {
+            "model": Base.SuccessEmptyDict,
             "description": "Successfully accepted the applicant",
-            "content": {}
         },
         403: {
-            "description": "You do not have permission to accept applicants",
-            "content": {}
+            "description": "You do not have permission to accept applicants"
         },
         404: {
-            "description": "The given user is not an applicant",
-            "content": {}
+            "description": "The given user is not an applicant"
         }
     }
 )
@@ -107,27 +138,24 @@ async def accept_applicant(
     request: Request,
     token: TokenString,
     userId: gaijinUserId
-) -> dict[Literal["status"], Literal["success"]]: 
-    try:
-        response = await (await get_request(
-            token, 
-            "clan_accept_membership_request",
-            userId=userId,
-            body={
-                "_id": await tokenSquadronId(token)
-            }
-        )).send()
-        return response
-    except HTTPException as e:
-        if e.detail == "b'!ERROR:CLAN_YOU_HAVE_NO_RIGHT'":
-            raise HTTPException(403, "You do not have permission to accept applicants.")
-        if e.detail == "b'!ERROR:CLAN_USER_IS_NOT_CANDIDATE'":
-            raise HTTPException(404, "The given user is not an applicant.")
-        _logger.exception("An exception occurred in accept applicant endpoint")
-        raise
+): 
+    response = await (await get_request(
+        token, 
+        "clan_accept_membership_request",
+        userId=userId,
+        body={
+            "_id": await tokenSquadronId(token)
+        }
+    )).send()
+    return response
 
 @router.post(
-    "/reject/{userId}"
+    "/reject/{userId}",
+    responses={
+        200: {"model": Base.SuccessEmptyDict, "description":"Successfully rejected user"},
+        404: {"model": Base.GaijinResponse, "description":"Applicant could not be found"},
+        403: {"model": Base.GaijinResponse, "description":"You do not have permission to reject applicants"}
+    }
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def reject_applicant(
@@ -145,12 +173,17 @@ async def reject_applicant(
             "comments": message
         }
     )).send()
+
     return response
 
 @router.post(
     "/role/{userId}", 
     summary="Get or set a member's role", 
-    description="Getting a member's role can be done by anyone, however setting requires deputy or commander"
+    description="Setting an user's role requires `Deputy` or `Commander`",
+    responses={
+        200: {"model": Base.SuccessEmptyDict},
+        403: {"model": Base.GaijinResponse, "description": "You do not have the required permissions"}
+    }
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def change_role(
@@ -198,7 +231,7 @@ async def kick_member(
 async def leave_squadron(
     request: Request,
     token: TokenString
-):
+) -> bool:
     response = await (await get_request(
         token, 
         "clan_leave"
@@ -218,27 +251,21 @@ async def get_clan_logs(
     fromEntry: Annotated[str, Query(title="The last call's 'lastLog' value to begin searching from")] = None
 ) -> Clans.LogsModel:
     allLogs = (await tokenSquadronId(token)) == clanId
-    try:
-        response = await get_request(
-            token, 
-            "clan_get_log",
-            body = {
-                "_id":clanId,
-                "count":limit,
-                "events": "create;info"
-            }
-        )
-        if (allLogs):
-            response.pop("events")
-        if fromEntry:
-            response["last"] = fromEntry
+    response = await get_request(
+        token, 
+        "clan_get_log",
+        body = {
+            "_id":clanId,
+            "count":limit,
+            "events": "create;info"
+        }
+    )
+    if (allLogs):
+        response.pop("events")
+    if fromEntry:
+        response["last"] = fromEntry
 
-        response = await response.send()
-    except HTTPException as e:
-        if e.detail == "b'!ERROR:CLAN_YOU_HAVE_NO_RIGHT'":
-            raise HTTPException(403, "You do not have permission to view this squadron's logs.")
-        _logger.exception("An exception occurred in squadron logs endpoint")
-        raise
+    response = await response.send()
 
     logs:list[dict[str, int|str]] = []
     for item in response["log"]:
@@ -293,27 +320,52 @@ async def get_clan_search(
     clanTag: Annotated[str, Query(title="Squadron tag to look up")] = None,
     limit: Annotated[int, Query(title="Amount of squadrons to return", gt=0, lt=50)] = 10
 ) -> list[Clans.ClanModel]:
-    if clanName is None and clanTag is None:
-        raise HTTPException(400, "You must provide either a clanName or clanTag")
+    return await searchClan(token, clanName=clanName, clanTag=clanTag, limit=limit)
+
+@router.post(
+    "/leaderboard",
+    summary="Gets the leaderboard of squadrons. Position here is zero indexed, so the first squadron is at position 0",
+)
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
+async def get_clan_leaderboard(
+    request: Request,
+    token: TokenString,
+    limit: Annotated[int, Query(title="The max ammount to get at once", gt=0, le=50)] = 20,
+    start: Annotated[int, Query(title="The index to start lookup from")] = 0
+) -> list[Clans.ClanModel]:
     response = await get_request(
         token, 
-        "clan_find_by_prefix",
-        count = limit
+        "clan_get_leaderboard",
+        count=limit,
+        start=start
     )
-    if clanName:
-        response.headers["namePrefix"] = clanName
-    else:
-        del response.headers["namePrefix"]
-    if clanTag:
-        response.headers["tagPrefix"] = clanTag
-    else:
-        del response.headers["tagPrefix"]
 
     response = await response.send()
-    if isinstance(response["clan"], dict):
-        response["clan"] = [response["clan"],]
-    
+    if response.get("clan") is None:
+        raise HTTPException(500, "Could not obtain leaderboard data from Gaijin")
     return response["clan"]
+
+@router.post(
+    "/leaderboard/{clanId}",
+    summary="Gets the leaderboard position of a given squadron. Position here is not zero indexed"
+)
+async def get_clan_leaderboard_position(
+    request: Request,
+    token: TokenString,
+    clanId: Annotated[int, Path(title="The squadron's ID")]
+) -> Clans.ClanPositionModel:
+    response = await get_request(
+        token, 
+        "clan_get_leaderboard",
+        clanId=clanId
+    )
+    response = await response.send()
+    if response.get("clan") is None:
+        raise HTTPException(404, "Could not obtain leaderboard position data from Gaijin")
+    return {
+        "pos": response["clan"]["pos"],
+        "rating": response["clan"]["astat"]["dr_era5_hist"]
+    }
 
 @router.post(
     "/{clanId}/",
@@ -324,17 +376,5 @@ async def get_clan(
     request: Request,
     token: TokenString,
     clanId: Annotated[int, Path(title="The squadron's ID")]
-):
-    data = await (
-        await get_request(
-            token,
-            "clan_get",
-            clanId=clanId
-        )
-    ).send()
-
-    candidates = data.get("candidates")
-    if isinstance(candidates, dict):
-        data["candidates"] = [candidates]
-
-    return data
+) -> Clans.ClanModel:
+    return await getClan(token, clanId)
