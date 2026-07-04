@@ -130,7 +130,7 @@ class Request(dict):
 		kwargs["headers"]["token"] = self.login.session_token
 		kwargs["headers"]["uidHint"] = str(self.login.uidHint)
 
-		async with self.login.__parent.operation() as session:
+		async with users_cache.operation() as session:
 			resp = await session.post(url, **kwargs)
 			await self._decode(resp)
 
