@@ -4,15 +4,19 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from uvicorn import run as uvicorn_run
 from os import getenv, chdir, path
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+chdir(path.dirname(path.abspath(__file__)))
+if not load_dotenv(".env"):
+	raise FileNotFoundError(".env file could not be loaded.")
+
 from utils.auth import users_cache
-from api.shared import RateLimitExceeded
-from api import users_router
-from api import clans_router, general_router 
+from api import users_router, clans_router, general_router, auth_router
+from api.shared import limiter
 
 logger = logging.getLogger()
 logging.getLogger("asyncio").setLevel(logging.WARNING)
@@ -20,12 +24,16 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 tags_metadata = [
 	{
+		"name": "authentication",
+		"description": "Operations used to authenticate with the API, and get or refresh a token to use in other endpoints."
+	},
+	{
 		"name": "clans",
-		"description": "Operations correlating to getting information about the clans/squadrons of the game War Thunder.",
+		"description": "Operations correlating to clans/squadrons.",
 	},
 	{
 		"name": "general",
-		"description": "Operations correlating to getting general information about the game War Thunder.",
+		"description": "Operations to get general information.",
 	},
 	#{ # TODO: Implement unit information pulling
 	#    "name": "units",
@@ -33,7 +41,7 @@ tags_metadata = [
 	#}, # Shall be implemented *eventually*, not an urgent job though
 	{
 		"name": "users",
-		"description": "Operations correlating to getting information about the users/players of the game War Thunder.",
+		"description": "Operations to get information about the users/players.",
 	}
 ]
 
@@ -48,11 +56,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
 	title="ThunderAPI",
 	description="API to retrieve War Thunder data.",
-	version="0.0.1",
+	version="1.0.0",
 	openapi_tags=tags_metadata,
 	swagger_ui_parameters={"defaultModelsExpandDepth": -1},
 	lifespan=lifespan
 )
+
+#region Rate Limiter
+app.state.limiter = limiter
 app.add_exception_handler(
 	RateLimitExceeded, 
 	lambda request, exc: (
@@ -60,11 +71,17 @@ app.add_exception_handler(
 		JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
 	)[1]
 )
+#endregion
+
+#region Add routers
+app.include_router(auth_router.router, prefix="/v1")
 app.include_router(clans_router.router, prefix="/v1")
 app.include_router(general_router.router, prefix="/v1")
 #app.include_router(units_router.router, prefix="/v1")
 app.include_router(users_router.router, prefix="/v1")
+#endregion
 
+#region Remove 422 responses from OpenAPI schema
 def custom_openapi():
 	if app.openapi_schema:
 		return app.openapi_schema
@@ -82,14 +99,12 @@ def custom_openapi():
 	return app.openapi_schema
 
 app.openapi = custom_openapi
+#endregion
 
 def main():
 
 	debug:bool
 	# region Debug mode setup
-	chdir(path.dirname(path.abspath(__file__)))
-	if not load_dotenv(".env"):
-		raise FileNotFoundError(".env file could not be loaded.")
 	debug = int(getenv("DEBUG_MODE", "0")) == 1
 	# endregion
 	# region Logging

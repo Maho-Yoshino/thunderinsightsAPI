@@ -1,10 +1,11 @@
+from os import getenv
 from typing_extensions import Annotated
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
 from urllib.parse import unquote
 from api.shared import get_request
 from api.models import Users
-from api.shared import TokenString
+from api.shared import TokenString, limiter
 
 router = APIRouter(
     prefix="/users",
@@ -20,7 +21,9 @@ async def get_terse(token:str, *userIds:int|str) -> dict[str, Users.TerseReturnM
     )).send()
 
 @router.post("/terse", summary="Get several users by ID")
+@limiter.shared_limit("users", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_users_terse_info(
+    request: Request,
     token: TokenString,
     id: Annotated[list[int], Query(
         title="The ID of the users to get information about", 
@@ -33,7 +36,9 @@ async def get_users_terse_info(
     return JSONResponse(await get_terse(token, *id))
 
 @router.post("/{userid}", summary="Get user by ID")
+@limiter.shared_limit("users", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_user_direct(
+    request: Request,
     token: TokenString,
     userid: Annotated[int, Path(title="The ID of the user to get information about", description="The ID of the user to get information about", gt=0)]
 ) -> Users.getUserDirectModel:
@@ -49,7 +54,9 @@ async def get_user_direct(
     summary="Get users by name",
     responses={}
 )
+@limiter.shared_limit("users", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_users_search(
+    request: Request,
     token: TokenString,
     nick: Annotated[str, Path(title="The nickname to search for")], 
     limit: Annotated[int, Query(title="How many users to retrieve", ge=2, le=50)] = 10

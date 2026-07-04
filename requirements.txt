@@ -1,8 +1,8 @@
 python-dotenv
 
+slowapi
 fastapi
 uvicorn
-
 apscheduler
 
 lz4

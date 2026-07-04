@@ -1,9 +1,10 @@
+from os import getenv
 from logging import getLogger
-from typing import Any, Literal
+from typing import Literal
 from typing_extensions import Annotated
-from fastapi import APIRouter, Path, Query, Form, HTTPException
+from fastapi import APIRouter, Path, Query, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
-from api.shared import get_request, TokenString
+from api.shared import get_request, TokenString, limiter
 from api.users_router import get_terse
 from api.models import Clans
 from utils.auth import users_cache
@@ -36,7 +37,9 @@ async def tokenSquadronId(token:str) -> int|None:
     "/{clanId}/apply", 
     summary="Sends an application to the squadron, if allowed"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def send_application(
+    request: Request,
     clanId: squadronId,
     token: TokenString
 ) -> bool:
@@ -52,7 +55,9 @@ async def send_application(
     "/{clanId}/applicants", 
     summary="Gets the currently applying members"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_applicants(
+    request: Request,
     token: TokenString,
     clanId: squadronId
 ) -> list[Clans.ApplicantModel]:
@@ -97,7 +102,9 @@ async def get_applicants(
         }
     }
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def accept_applicant(
+    request: Request,
     token: TokenString,
     userId: gaijinUserId
 ) -> dict[Literal["status"], Literal["success"]]: 
@@ -122,7 +129,9 @@ async def accept_applicant(
 @router.post(
     "/reject/{userId}"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def reject_applicant(
+    request: Request,
     token: TokenString,
     userId: gaijinUserId,
     message: Annotated[str, Query(title="Message to include alongside rejection")] = ""
@@ -143,7 +152,9 @@ async def reject_applicant(
     summary="Get or set a member's role", 
     description="Getting a member's role can be done by anyone, however setting requires deputy or commander"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def change_role(
+    request: Request,
     token: TokenString,
     userId: gaijinUserId,
     role: Annotated[Clans.RolesDisplay, Query(title="The role to assign")]
@@ -163,7 +174,9 @@ async def change_role(
     summary="Kicks the given user",
     description="Requires either `Officer`, `Deputy` or `Commander` rank to remove someone else"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def kick_member(
+    request: Request,
     token: TokenString,
     userId: gaijinUserId,
     reason: Annotated[str, Form(title="The reason for kicking")] = ""
@@ -181,7 +194,9 @@ async def kick_member(
     "/leave",
     summary="Leaves the current squadron"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def leave_squadron(
+    request: Request,
     token: TokenString
 ):
     response = await (await get_request(
@@ -194,7 +209,9 @@ async def leave_squadron(
     "/{clanId}/logs", 
     summary="Gets the squadron logs"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_clan_logs(
+    request: Request,
     clanId: squadronId, 
     token: TokenString,
     limit: Annotated[int, Query(title="The max ammount to get at once", gt=0, le=50)] = 10,
@@ -268,7 +285,9 @@ async def get_clan_logs(
     })
 
 @router.post("/search/", summary="Search for squadron")
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_clan_search(
+    request: Request,
     token: TokenString,
     clanName: Annotated[str, Query(title="Squadron name to look up")] = None,
     clanTag: Annotated[str, Query(title="Squadron tag to look up")] = None,
@@ -300,7 +319,9 @@ async def get_clan_search(
     "/{clanId}/",
     summary="Gets data about the given squadron"
 )
+@limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_clan(
+    request: Request,
     token: TokenString,
     clanId: Annotated[int, Path(title="The squadron's ID")]
 ):

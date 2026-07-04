@@ -1,4 +1,6 @@
+from os import getenv
 from fastapi import HTTPException, Form
+from slowapi import Limiter
 from re import search as re_search
 from tools import Request
 from utils.auth import AuthenticationError, users_cache
@@ -7,6 +9,8 @@ from pydantic import StringConstraints, Field
 from datetime import timedelta
 from typing import Any
 from enum import StrEnum
+
+limiter = Limiter(key_func=lambda request: request.client.host, default_limits=[getenv("REGULAR_RATE_LIMIT", "30/minute")])
 
 async def get_request(token: str, template:str, **headers:str|dict[str, Any]):
 	if (entry := await users_cache.get(token)) is None:
@@ -41,8 +45,4 @@ TokenString = Annotated[
 	str,
 	Form(description="Token obtained from the `login` endpoint.")
 ]
-
-class RateLimitExceeded(HTTPException):
-	def __init__(self, detail: str = "Rate limit exceeded"):
-		super().__init__(status_code=429, detail=detail)
 

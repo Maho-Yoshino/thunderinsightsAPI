@@ -24,7 +24,6 @@ from utils.helper import StringTimeToTimedelta
 
 _logger = getLogger(__name__)
 
-deleteAfter = StringTimeToTimedelta(getenv("DELETE_AFTER"))
 checkInterval = StringTimeToTimedelta(getenv("CHECK_INTERVAL"))
 refreshIfLessMinutes = int(getenv("REFRESH_IF_LESS_MINS", 15))
 if refreshIfLessMinutes > 60:

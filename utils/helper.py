@@ -18,9 +18,5 @@ def StringTimeToTimedelta(text:str) -> timedelta:
         total += val * _UNIT_MAP[unit]
     return total
 
-def RateLimitParse(text:str) -> tuple[int, timedelta]:
-    # Example: "2/M" -> (2, timedelta(minutes=1))
-    limit, period = text.split("/")
-    return int(limit), StringTimeToTimedelta(f"1{period[0]}")
 def dtToTimestamp(dt:datetime) -> int:
     return round(dt.timestamp(), 0)
