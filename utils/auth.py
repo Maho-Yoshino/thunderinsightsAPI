@@ -342,7 +342,7 @@ class UserTokenCache:
 						{schema.JWT_EXPIRES} = ?, 
 						{schema.USER_TOKEN} = ?, 
 						{schema.UID} = ?,
-						{schema.LAST_USED} = ?,
+						{schema.LAST_USED} = ?
 					WHERE {schema.EMAIL} = ?""", 
 					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], 0, email)
 				)
