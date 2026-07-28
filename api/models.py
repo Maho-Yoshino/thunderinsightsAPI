@@ -100,8 +100,8 @@ class Clans:
 			uid: IntString
 			nick: str
 			role: int
-			platform: int
-			max_unit_rank: int
+			platform: int | None = None
+			max_unit_rank: int | None = None
 			initiator: IntString | None = None
 			initiator_nick: str | None = None
 			date: int

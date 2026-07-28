@@ -111,7 +111,7 @@ class UserTokenCache:
 			p = UserTokenCache.dbSchema
 			self.hashed = str(row[p.HASH])
 			self.jwt = str(row[p.JWT])
-			self.jwt_expires = jwt_get_data(self.jwt)
+			self.jwt_expires = jwt_get_data(self.jwt).exp
 			self.user_token = str(row[p.USER_TOKEN])
 			self.last_used = datetime.fromtimestamp(int(row[p.LAST_USED]), UTC)
 			self.requests_count = int(row[p.REQUESTS_CNT])
