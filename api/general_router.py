@@ -3,11 +3,12 @@ from typing_extensions import Annotated
 from typing import Literal, Any
 from fastapi import APIRouter, Query, Path, Request
 from fastapi.responses import JSONResponse
-from utils.auth import users_cache
+from utils import users_cache
 from utils.replayParser import Replay
 from datetime import datetime, UTC
 from bs4 import BeautifulSoup, Tag
 from enum import IntEnum
+from api.backends.general import *
 from api.models import General
 from api.shared import IpString, limiter
 
@@ -15,13 +16,6 @@ router = APIRouter(
 	tags=["general"],
 	responses={404: {"description": "Not found"}}
 )
-
-async def getLatestGameVer(branch: Literal["dev", "dev-stable"]|None):
-	if branch is None: branch = ""
-	async with users_cache.operation() as session:
-		_ = await session.get(f"https://yupmaster.gaijinent.com/yuitem/get_version.php?proj=warthunder&tag={branch}")
-		_ = await _.text()
-	return _
 
 @router.get("/latestGameVersion", summary="Get latest game version")
 @limiter.shared_limit("general", getenv("REGULAR_RATE_LIMIT", "30/minute"))

@@ -95,6 +95,14 @@ class GaijinErrorCodes(Enum): # TODO: Finish documenting gaijin error codes
 		"code": 404,
 		"detail": "The given user is not an applicant"
 	}
+	DECLINE_TO_CREATE_NEW_PROFILE = {
+		"code": 403,
+		"detail": "User doesn't exist"
+	}
+	CLAN_IS_NOT_EXISTS = {
+		"code": 404,
+		"detail": "Searched clan doesn't exist"
+	}
 	@staticmethod
 	def parse(response: bytes) -> None:
 		"""Parse a Gaijin error code string into a properly formatted `HTTPException`. Returns early if error is not found or not given"""

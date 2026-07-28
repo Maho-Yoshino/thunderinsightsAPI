@@ -1,12 +1,18 @@
 python-dotenv
+orjson
 
+# API Backend
 slowapi
 fastapi
 uvicorn
 apscheduler
 
+# Data processing
 lz4
 bs4
+pandas
+PyJWT[crypto]
 
+# Async
 aiosqlite
 aiohttp

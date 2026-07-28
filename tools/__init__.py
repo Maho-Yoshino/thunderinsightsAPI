@@ -1,6 +1,6 @@
 import json as _json
 from os import getenv
-from typing import Literal, Any
+from typing import Literal, Any, TYPE_CHECKING
 from logging import getLogger
 from aiohttp import ClientResponse
 from requests import get as req_get
@@ -9,12 +9,13 @@ from requests.exceptions import JSONDecodeError
 from subprocess import run as _run
 from random import choice
 from fastapi import HTTPException
-from utils.auth import UserTokenCache
 from templates import TEMPLATES, load as load_template
 from .json_to_blk import json_to_blkx, blkx_to_blk, compress_lz4hc, compress_bzip2, find_binblk
 from .hex_to_json import lz4_decompress_try, bzip_decompress_try
 from .const import Action, UserAction, ServerPool, GaijinErrorCodes
-from utils.auth import users_cache
+from utils import users_cache
+if TYPE_CHECKING:
+	from utils import UserTokenCache
 
 _logger = getLogger(__name__)
 
@@ -127,7 +128,7 @@ class Request(dict):
 			kwargs["headers"] = {**self.headers, "Content-Type": "application/octet-stream"}
 			if compr:
 				kwargs["headers"]["compr"] = compr
-		kwargs["headers"]["token"] = self.login.session_token
+		kwargs["headers"]["token"] = self.login.jwt
 		kwargs["headers"]["uidHint"] = str(self.login.uidHint)
 
 		async with users_cache.operation() as session:

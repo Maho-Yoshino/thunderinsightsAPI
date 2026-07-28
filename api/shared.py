@@ -2,7 +2,7 @@ from os import getenv
 from fastapi import HTTPException, Form
 from slowapi import Limiter
 from tools import Request
-from utils.auth import AuthenticationError, users_cache
+from utils import AuthenticationError, users_cache
 from typing_extensions import Annotated
 from pydantic import StringConstraints, Field
 from datetime import timedelta

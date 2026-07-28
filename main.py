@@ -6,16 +6,17 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from uvicorn import run as uvicorn_run
-from os import getenv, chdir, path
+from os import getenv, path
 from pathlib import Path
 from contextlib import asynccontextmanager
+from os import chdir, path
+from dotenv import load_dotenv
 
-chdir(path.dirname(path.abspath(__file__)))
-if not load_dotenv(".env"):
-	raise FileNotFoundError(".env file could not be loaded.")
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
-from utils.auth import users_cache
-from api import users_router, clans_router, general_router, auth_router
+from utils import users_cache
+from api import users_router, clans_router, general_router, auth_router, units_router
 from api.shared import limiter
 
 logger = logging.getLogger()
@@ -35,10 +36,10 @@ tags_metadata = [
 		"name": "general",
 		"description": "Operations to get general information.",
 	},
-	#{ # TODO: Implement unit information pulling
-	#    "name": "units",
-	#    "description": "Operations correlating to getting information about the units of the game War Thunder.",
-	#}, # Shall be implemented *eventually*, not an urgent job though
+	{
+	    "name": "units",
+	    "description": "Operations correlating to getting information about the units of the game War Thunder.",
+	},
 	{
 		"name": "users",
 		"description": "Operations to get information about the users/players.",
@@ -77,7 +78,7 @@ app.add_exception_handler(
 app.include_router(auth_router.router, prefix="/v1")
 app.include_router(clans_router.router, prefix="/v1")
 app.include_router(general_router.router, prefix="/v1")
-#app.include_router(units_router.router, prefix="/v1")
+app.include_router(units_router.router, prefix="/v1")
 app.include_router(users_router.router, prefix="/v1")
 #endregion
 
@@ -102,6 +103,9 @@ app.openapi = custom_openapi
 #endregion
 
 def main():
+	chdir(path.dirname(path.abspath(__file__)))
+	if not load_dotenv(".env"):
+		raise FileNotFoundError(".env file could not be loaded.")
 
 	debug:bool
 	# region Debug mode setup
@@ -126,9 +130,6 @@ def main():
 	logger.addHandler(handler)
 	logger.setLevel(logging.DEBUG if debug else logging.INFO)
 	# endregion
-
-	loop = asyncio.new_event_loop()
-	asyncio.set_event_loop(loop)
 
 	logger.info("Starting up")
 	try:

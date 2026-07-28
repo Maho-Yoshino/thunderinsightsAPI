@@ -9,7 +9,7 @@ from apscheduler.job import Job
 from aiosqlite import connect, Row, OperationalError
 from os import getenv
 from datetime import UTC, datetime, timedelta
-from aiohttp import ClientSession, ClientResponse, ClientTimeout
+from aiohttp import ClientSession, ClientResponse
 from typing import Any
 from fastapi import HTTPException
 from hashlib import sha256
@@ -19,8 +19,10 @@ from enum import StrEnum
 from contextlib import asynccontextmanager
 from random import randint
 from json import loads
+from jwt import decode as jwt_decode
+from dataclasses import dataclass
 
-from utils.helper import StringTimeToTimedelta
+from utils.helper import StringTimeToTimedelta, dtToTimestamp
 
 _logger = getLogger(__name__)
 
@@ -45,6 +47,37 @@ class TwoFactorRequired(AuthenticationError):
 		}
 		super().__init__(403, _)
 
+@dataclass(frozen=True, slots=True)
+class jwtData:
+	auth: str
+	cntry: str
+	exp: datetime
+	fac: str
+	iat: datetime
+	lng: str
+	loc: str
+	nick: str
+	slt: str
+	tgs: tuple[str]
+	uid: int
+	extras: dict[str, Any]
+
+def jwt_get_data(jwt:str) -> jwtData:
+	data = jwt_decode(jwt, options={"verify_signature": False})
+	return jwtData(
+		data["auth"],
+		data["cntry"],
+		datetime.fromtimestamp(data["exp"], UTC),
+		data["fac"],
+		datetime.fromtimestamp(data["iat"], UTC),
+		data["lng"],
+		data["loc"],
+		data["nick"],
+		data["slt"],
+		tuple(data["tgs"].split(",")),
+		data["uid"],
+		extras={k:v for k, v in data.items() if k not in ["auth","cntry","exp","fac","iat","lng","loc","nick","slt","tgs","uid"]}
+	)
 # region User Tokens Cache and refresh
 
 class UserTokenCache:
@@ -53,9 +86,9 @@ class UserTokenCache:
 		TABLE = "tokens"
 		HASH = "hash_token"
 		EMAIL = "email"
-		SESSION_TOKEN = "session_token"
-		USER_TOKEN = "user_token"
-		EXPIRES = "expires"
+		JWT = "jwt"
+		JWT_EXPIRES = "jwt_expires"
+		USER_TOKEN = "token"
 		UID = "uidHint"
 		REQUESTS_CNT = "requests_count"
 		LAST_USED = "last_used"
@@ -63,9 +96,10 @@ class UserTokenCache:
 
 	class Entry: # Short lived data class with some helper methods
 		hashed: str
-		session_token: str # Session token
+		jwt: str # Session token
+		jwt_expires: datetime # Inferred from jwt
+		session_token_expires: datetime # Session token expiry
 		user_token: str # User token
-		expires: datetime # Token Expiration Timestamp
 		last_used: datetime # Used for invalidating old tokens
 		uidHint: int = -1 # uidHint value for refresh and other auth calls
 		email:str # For contact purposes
@@ -76,9 +110,9 @@ class UserTokenCache:
 		def __init__(self, row:Row, parent:'UserTokenCache'):
 			p = UserTokenCache.dbSchema
 			self.hashed = str(row[p.HASH])
-			self.session_token = str(row[p.SESSION_TOKEN])
+			self.jwt = str(row[p.JWT])
+			self.jwt_expires = jwt_get_data(self.jwt)
 			self.user_token = str(row[p.USER_TOKEN])
-			self.expires = datetime.fromtimestamp(int(row[p.EXPIRES]), UTC)
 			self.last_used = datetime.fromtimestamp(int(row[p.LAST_USED]), UTC)
 			self.requests_count = int(row[p.REQUESTS_CNT])
 			self.uidHint = int(row[p.UID])
@@ -88,7 +122,7 @@ class UserTokenCache:
 			self.__saved = self.to_json()
 
 		async def refresh(self):
-			if datetime.now(UTC) > self.expires:
+			if datetime.now(UTC) > self.jwt_expires:
 				raise AuthenticationError(401, "Login expired. Please reauthenticate.")
 
 			async with self.__parent.operation() as session:
@@ -108,15 +142,17 @@ class UserTokenCache:
 					return
 				raise AuthenticationError(400, f"An error occurred during authentication: {content}")
 
-			self.expires = datetime.now(UTC) + timedelta(seconds=content["token_exp"])
+			if self.jwt_expires != content["jwt"]:
+				self.jwt = content["jwt"]
+				self.jwt_expires = jwt_get_data(self.jwt).exp
 			await self._write_values()
 		
 		async def add_auth_headers(self, headerData: dict[str, Any]) -> dict[str, Any]:
 			if self.timeLeft() <= timedelta(minutes=30):
 				await self.refresh()
-			if self.session_token:
+			if self.jwt:
 				
-				headerData["token"] = self.session_token
+				headerData["token"] = self.jwt
 				headerData["uidHint"] = str(self.uidHint)
 				headerData["transactid"] = str(randint(0, 999999999999))
 
@@ -130,7 +166,7 @@ class UserTokenCache:
 				raise AuthenticationError(403, "Authentication required for this request, but no token is available. Please ensure you have logged in successfully.")
 
 		def timeLeft(self) -> timedelta:
-			return self.expires - datetime.now(UTC)
+			return self.jwt_expires - datetime.now(UTC)
 		def usedWithin(self, minutes:int) -> bool:
 			return self.last_used > (datetime.now(UTC) - timedelta(minutes=minutes)) 
 		
@@ -139,7 +175,7 @@ class UserTokenCache:
 			for key, value in self.to_json().items():
 				if self.__saved[key] == value: continue
 				if isinstance(value, datetime):
-					value = round(value.timestamp(), None)
+					value = dtToTimestamp(value)
 				changed[key] = value
 			
 			if not changed: # No point running query, no changes made
@@ -163,9 +199,9 @@ class UserTokenCache:
 			p = self.__parent.dbSchema
 			return {
 				p.HASH: self.hashed,
-				p.SESSION_TOKEN: self.session_token,
+				p.JWT: self.jwt,
+				p.JWT_EXPIRES: self.jwt_expires,
 				p.USER_TOKEN: self.user_token,
-				p.EXPIRES: self.expires,
 				p.LAST_USED: self.last_used,
 				p.UID:self.uidHint,
 				p.EMAIL:self.email,
@@ -188,7 +224,7 @@ class UserTokenCache:
 		#endregion
 
 		self.__pending_2fa = {}
-		self.__db_path = Path(__file__).parent / "database.db"
+		self.__db_path = Path(__file__).parent / "users.db"
 
 		_logger.debug("User Token Cache initialized")
 
@@ -196,17 +232,11 @@ class UserTokenCache:
 		schema = self.dbSchema
 		hash = self._hash_token(token)
 		async with self._transaction() as cur:
-			row = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.HASH} = ? AND {schema.EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
+			row = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.HASH} = ? AND {schema.JWT_EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
 			if row:
 				await cur.execute(f"UPDATE {schema.TABLE} SET {schema.REQUESTS_CNT} = {schema.REQUESTS_CNT} + 1, {schema.LAST_USED} = strftime('%s', 'now') WHERE {schema.HASH} = ?", (hash,))
 				return self.Entry(row, self)
 			return None
-	async def exists(self, token:str) -> bool:
-		schema = self.dbSchema
-		hash = self._hash_token(token)
-		async with self._transaction() as cur:
-			row = await (await cur.execute(f"SELECT 1 FROM {schema.TABLE} WHERE {schema.HASH} = ? AND {schema.EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
-			return row is not None
 	
 	async def login(self, email:str, password:str|None = None):
 		"""Adds the user to the database if needed and returns the token for the user"""
@@ -301,19 +331,27 @@ class UserTokenCache:
 		async with self._transaction() as cur:
 			schema = self.dbSchema
 			raw, hash = self._generate_hash()
-			rn_timestamp = round(datetime.now(UTC).timestamp())
+			jwt_decoded = jwt_get_data(data["jwt"])
 			if await (await cur.execute(f"SELECT 1 FROM {schema.TABLE} WHERE {schema.EMAIL} = ?", (email,))).fetchone() is not None:
-				_logger.info(f"Overwriting old loginentry for {email}")
+				_logger.debug(f"Overwriting old loginentry for {email}")
 				await cur.execute(f"""
 					UPDATE {schema.TABLE} 
-					SET {schema.HASH} = ?, {schema.SESSION_TOKEN} = ?, {schema.USER_TOKEN} = ?, {schema.EXPIRES} = ?, {schema.UID} = ?, {schema.LAST_USED} = ? WHERE {schema.EMAIL} = ?""", 
-					(hash, data["jwt"], data["token"], rn_timestamp + data["token_exp"], data["user_id"], rn_timestamp, email)
+					SET 
+						{schema.HASH} = ?, 
+						{schema.JWT} = ?,
+						{schema.JWT_EXPIRES} = ?, 
+						{schema.USER_TOKEN} = ?, 
+						{schema.UID} = ?,
+						{schema.LAST_USED} = ?,
+					WHERE {schema.EMAIL} = ?""", 
+					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], 0, email)
 				)
 			else:
 				await cur.execute(f"""
-					INSERT INTO {schema.TABLE} ({schema.HASH}, {schema.SESSION_TOKEN}, {schema.USER_TOKEN}, {schema.EXPIRES}, {schema.UID}, {schema.EMAIL}, {schema.LAST_USED}) 
+					INSERT INTO {schema.TABLE} 
+					({schema.HASH}, {schema.JWT}, {schema.JWT_EXPIRES}, {schema.USER_TOKEN}, {schema.UID}, {schema.EMAIL}, {schema.LAST_USED}) 
 					VALUES ({', '.join(["?" for i in range(7)])})""", 
-					(hash, data["jwt"], data["token"], rn_timestamp + data["token_exp"], data["user_id"], email, rn_timestamp)
+					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], email, 0)
 				)		
 		return raw
 	# region Helpers
@@ -321,7 +359,7 @@ class UserTokenCache:
 		self.__pending_2fa = {k:v for k,v in self.__pending_2fa.items() if v["expires"] > round(datetime.now(UTC).timestamp(), 0)}
 		schema = self.dbSchema
 		async with self._transaction() as cur:
-			rows = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.EXPIRES} > strftime('%s', 'now')")).fetchall()
+			rows = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.JWT_EXPIRES} > strftime('%s', 'now')")).fetchall()
 		for row in rows:
 			entry = self.Entry(row, self)
 			try:
@@ -334,7 +372,9 @@ class UserTokenCache:
 				)
 				_logger.info(f"Removed expired entry for {entry.email}")
 		async with self._transaction() as cur:
-			await cur.execute(f"DELETE FROM {schema.TABLE} WHERE {schema.EXPIRES} <= strftime('%s', 'now')")
+			operation = await cur.execute(f"DELETE FROM {schema.TABLE} WHERE {schema.JWT_EXPIRES} <= strftime('%s', 'now')")
+			if operation.rowcount > 0:
+				_logger.info(f"Deleted {operation.rowcount} expired entries")
 		
 	def _generate_hash(self) -> tuple[str, str]:
 		raw_token = token_urlsafe(32)
@@ -371,9 +411,10 @@ class UserTokenCache:
 			if self.__session is not None and not self.__session.closed:
 				return
 			self.__closing = False
-			self.__session = ClientSession()
+			self.__session = ClientSession(headers={"User-Agent": "ThunderAPI/1.0"})
 
-		await self._init_db()
+		await self._init_db(self.__db_path)
+		await self._init_db(Path(__file__).parent / "vehicleParser" / "units.db")
 		if self.__autorefresh_job is None:
 			self.__autorefresh_job = self.scheduler.add_job(
 				self._refresh,
@@ -420,7 +461,8 @@ class UserTokenCache:
 				self.__active_ops = 0
 				self.__active_ops_done.set()
 
-	async def _handle_response(self, resp:ClientResponse) -> dict[str, Any]:
+	@staticmethod
+	async def _handle_response(resp:ClientResponse) -> dict[str, Any]:
 		text = await resp.text()
 
 		if resp.status >= 400:
@@ -430,15 +472,16 @@ class UserTokenCache:
 
 		return loads(text)
 
-	async def _init_db(self):
-		if self.__db_path.exists():
+	@staticmethod
+	async def _init_db(dbPath:Path):
+		if dbPath.exists():
 			return
 
-		init_script = self.__db_path.parent / "db_create.sql"
-		self.__db_path.touch()
+		init_script = dbPath.parent / (".".join(dbPath.name.split(".")[:-1]) + "_create.sql")
+		dbPath.touch()
 
 		try:
-			async with connect(self.__db_path) as con:
+			async with connect(dbPath) as con:
 				lines = re_sub("--.*\n", "", init_script.read_text()).replace("\n", "").split(";")
 
 				for line in lines:
@@ -453,9 +496,7 @@ class UserTokenCache:
 			_logger.debug("Database successfully initialized")
 
 		except OperationalError:
-			self.__db_path.unlink()
+			dbPath.unlink()
 			_logger.exception("An error occurred during database setup")
 			raise
 	#endregion
-
-users_cache = UserTokenCache()

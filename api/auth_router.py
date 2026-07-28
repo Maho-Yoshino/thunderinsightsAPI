@@ -2,7 +2,7 @@ from os import getenv
 from typing_extensions import Annotated
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
-from utils.auth import users_cache
+from utils import users_cache
 from pydantic import EmailStr
 from api.models import Authentication
 from api.shared import TokenString, limiter
