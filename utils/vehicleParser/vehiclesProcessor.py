@@ -101,19 +101,39 @@ class _limit:
 	maxValue: int|float
 	minValue: int|float
 
+	@classmethod
+	def from_values(cls, value1:int|float, value2:int|float):
+		return cls(
+			max(value1, value2),
+			min(value1, value2)
+		)
+	@classmethod
+	def from_list(cls, data:list[int|float]|None):
+		if data is None:
+			return
+		return cls.from_values(max(data), min(data))
+
+	def to_json(self):
+		return asdict(self)
+
 _sensor_data_cache: dict[Path, dict[str, Any]] = {}
 _weapon_data_cache: dict[Path, dict[str, Any]] = {}
 
+@dataclass(frozen=True, slots=True)
 class Sensor:
 	@dataclass(frozen=True, slots=True)
 	class Antenna:
 		angleHalfSens: float
 		sideLobesSensitivity: float
+
+		def to_json(self): 
+			return asdict(self)
+	@dataclass(slots=True)
 	class _transiversEntry:
 		type: str
 		sideLobesAttenuation: float | None
 		power: float
-		pulseWidth: float | None = None
+		pulseWidth: float | None
 		bands: list[int]
 		rcs: float
 		ranges: dict[str, float]
@@ -121,50 +141,47 @@ class Sensor:
 		multipathEffect: list[float]
 		antenna: Sensor.Antenna | dict[str, Sensor.Antenna]
 		visibilityType: Literal["infraRed", "radarIntercept", "optic"]
-		def __init__(self, _type:str, data:dict[str, float|int]):
-			self.type = _type
-			self.sideLobesAttenuation = data.get("sideLobesAttenuation")
+		@classmethod
+		def from_json(cls, _type:str, data:dict[str, float|int]):
 			if "power" in data:
-				self.power = data["power"]
+				power = data["power"]
 			elif "pulsePower" in data:
-				self.power = data["pulsePower"]
-			
-			self.pulseWidth = data.get("pulseWidth")
-			self.visibilityType = data.get("visibilityType")
+				power = data["pulsePower"]
+
 			if "band" in data:
 				if isinstance(data["band"], int):
-					self.bands = [data["band"],]
+					bands = [data["band"],]
 				else:
-					self.bands = data["band"]
+					bands = data["band"]
 			else:
-				self.bands = []
+				bands = []
 
 			if ("receiver" in data):
 				receiver:dict[str, float|dict] = data["receiver"]
-				self.rcs = receiver.get("rcs", None)
-				self.ranges = {}
+				rcs = receiver.get("rcs", None)
+				ranges = {}
 				for k, v in receiver.items():
 					if not k.startswith("range") and k != "rangeMax":
 						continue
-					self.ranges[k] = v
-				self.rangeMax = receiver["rangeMax"]
+					ranges[k] = v
+				rangeMax = receiver["rangeMax"]
 			else:
-				self.rcs = data.get("rcs", None)
-				self.ranges = {}
+				rcs = data.get("rcs", None)
+				ranges = {}
 				for k, v in data.items():
 					if not k.startswith("range") and k != "rangeMax":
 						continue
-					self.ranges[k] = v
-				self.rangeMax = data["rangeMax"]
+					ranges[k] = v
+				rangeMax = data["rangeMax"]
 
 			if "antenna" in data:
-				if "sideLobesAttenuation" in data["antenna"]:
-					self.antenna = Sensor.Antenna(
+				if "sideLobesSensitivity" in data["antenna"]:
+					antenna = Sensor.Antenna(
 						data["antenna"]["angleHalfSens"],
 						data["antenna"]["sideLobesSensitivity"]
 					)
 				elif "azimuth" in data["antenna"]:
-					self.antenna = {
+					antenna = {
 						"azimuth": Sensor.Antenna(
 							data["antenna"]["azimuth"]["angleHalfSens"],
 							data["antenna"]["azimuth"]["sideLobesSensitivity"]
@@ -174,10 +191,45 @@ class Sensor:
 							data["antenna"]["elevation"]["sideLobesSensitivity"]
 						),
 					}
+			
+			return cls(
+				_type,
+				data.get("sideLobesAttenuation"),
+				power,
+				data.get("pulseWidth"),
+				bands,
+				rcs,
+				ranges,
+				rangeMax,
+				[],
+				antenna,
+				data.get("visibilityType")
+			)
+		def to_json(self): 
+			obj = asdict(self)
+			for key, value in obj.items():
+				if isinstance(value, Sensor.Antenna):
+					obj[key] = value.to_json()
+				elif isinstance(value, dict):
+					for antenna, entry in value.items():
+						if not isinstance(entry, Sensor.Antenna):
+							continue
+						obj[key][antenna] = entry.to_json()
+
+			return obj
 	@dataclass(frozen=True, slots=True)
 	class _illuminationTransmitter:
 		power: float
 		antenna: Sensor.Antenna
+
+		def to_json(self):
+			obj = asdict(self)
+			for key, value in obj.items():
+				if isinstance(value, Sensor.Antenna):
+					obj[key] = value.to_json()
+
+			return obj
+	@dataclass(frozen=True, slots=True)
 	class _signalEntry:
 		@dataclass(frozen=True, slots=True)
 		class _distance:
@@ -196,6 +248,8 @@ class Sensor:
 					data["maxValue"],
 					data.get("width")
 				)
+			def to_json(self): 
+				return asdict(self)
 		@dataclass(frozen=True, slots=True)
 		class _dopplerSpeed:
 			presents: bool
@@ -218,6 +272,8 @@ class Sensor:
 					data["signalWidthMin"],
 					data["width"]
 				)
+			def to_json(self): 
+				return asdict(self)
 		type: str
 		groundClutter: bool
 		aircraftAsTarget: bool
@@ -229,16 +285,28 @@ class Sensor:
 		dopplerSpeed: _dopplerSpeed | None
 		extras: dict[str, Any]
 
-		def __init__(self, _type:str, data:dict[str, Any]):
-			self.type = _type
-			self.groundClutter = data.get("groundClutter", True)
-			self.aircraftAsTarget = data.get("aircraftAsTarget", True)
-			self.IFF = data.get("friendFoeId", False)
-			self.targetId = data.get("targetId", False)
-			self.mainBeamNotchWidth = data.get("mainBeamNotchWidth")
-			self.mainBeamNotchMaxElevation = data.get("mainBeamNotchMaxElevation")
-			self.distance = self._distance.from_json(data.get("distance"))
-			self.dopplerSpeed = self._dopplerSpeed.from_json(data.get("dopplerSpeed"))
+		@classmethod
+		def from_json(cls, _type:str, data:dict[str, Any]):
+			cls(
+				_type,
+				data.get("groundClutter", True),
+				data.get("aircraftAsTarget", True),
+				data.get("friendFoeId", False),
+				data.get("targetId", False),
+				data.get("mainBeamNotchWidth"),
+				data.get("mainBeamNotchMaxElevation"),
+				cls._distance.from_json(data.get("distance")),
+				cls._dopplerSpeed.from_json(data.get("dopplerSpeed")),
+				{k:v for k, v in data.items() if k not in ["groundClutter", "aircraftAsTarget", "friendFoeId", "targetId", "mainBeamNotchWidth", "mainBeamNotchMaxElevation", "distance", "dopplerSpeed"]}
+			)
+
+		def to_json(self):
+			obj = asdict(self)
+			for key, value in obj.items():
+				if isinstance(value, (self._distance, self._dopplerSpeed)):
+					obj[key] = asdict(value)
+			return obj
+	@dataclass(frozen=True, slots=True)
 	class _scanPattern:
 		name: str
 		scanPatternSet: str
@@ -253,55 +321,81 @@ class Sensor:
 		barsCount: int
 		rowMajor: bool
 
-		def __init__(self, name: str, data:dict[str, Any], scanPatternSet:str):
-			self.name = name
-			self.scanPatternSet = scanPatternSet
-			self.type = data.get("type")
-			
-			_ = sorted(data.get("azimuthLimits"), reverse=True)
-			self.azimuthLimits = _limit(_[0], _[1])
-			
-			_ = sorted(data.get("elevationLimits"), reverse=True)
-			self.elevationLimits = _limit(_[0], _[1])
+		@classmethod
+		def from_data(cls, name: str, data:dict[str, Any], scanPatternSet:str):
+			return cls(
+				name,
+				scanPatternSet,
+				data.get("type"),
+				_limit.from_list(data.get("azimuthLimits")),
+				_limit.from_list(data.get("elevationLimits")),
+				data.get("rollStabLimit"),
+				data.get("pitchStabLimit"),
+				data.get("period"),
+				data.get("width"),
+				data.get("barHeight"),
+				data.get("barsCount"),
+				data.get("rowMajor")
+			)
 
-			self.rollStabLimit = data.get("rollStabLimit")
-			self.pitchStabLimit = data.get("pitchStabLimit")
+		def to_json(self):
+			obj = asdict(self)
+			for key, value in obj.items():
+				if isinstance(value, _limit):
+					obj[key] = value.to_json()
 
-			self.period = data.get("period")
-			self.width = data.get("width")
-			self.barHeight = data.get("barHeight")
-			self.barsCount = data.get("barsCount")
-			self.rowMajor = data.get("rowMajor")
+			return obj
+	@dataclass(frozen=True, slots=True)
 	class _targetTypeId:
 		name: str
 		targetType: list[str]
 
-		def __init__(self, data:dict[str, Any]):
-			self.name = data.get("name")
-			self.targetType = data.get("targetType")
+		@classmethod
+		def from_json(cls, data:dict[str, Any]):
+			return cls(
+				data.get("name"),
+				data.get("targetType")
+			)
+		def to_json(self):
+			return asdict(self)
+	@dataclass(frozen=True, slots=True)
 	class _vehicleTypeId:
 		name: str
 		propulsion: dict[str, str|int]
 
-		def __init__(self, data:dict[str, Any]):
-			self.name = data.get("name")
-			self.propulsion = data.get("targetPropulsion")
+		@classmethod
+		def from_json(cls, data:dict[str, Any]):
+			return cls (
+				data.get("name"),
+				data.get("targetPropulsion")
+			)
+
+		def to_json(self):
+			return asdict(self)
 
 	type:str
 	name:str
 	displayName: str
 	maxTargets:int
-	transivers: list[_transiversEntry]
+	transivers: tuple[_transiversEntry]
 	illuminationTransmitter: _illuminationTransmitter | None
-	signals: list[_signalEntry]
-	signals_track:bool | None = None
-	scopeRangeSets: dict[str, list[float]]
-	scanPatterns: list[_scanPattern]
-	targetTypeId: list[_targetTypeId]
-	vehicleTypeId: list[_vehicleTypeId]
+	signals: tuple[_signalEntry]
+	signals_track:bool | None
+	scopeRangeSets: dict[str, tuple[float]]
+	scanPatterns: tuple[_scanPattern]
+	targetTypeId: tuple[_targetTypeId]
+	vehicleTypeId: tuple[_vehicleTypeId]
 	sizeRanges: dict[str, _limit]
 
-	def __init__(self, sensor: Path):
+
+	@classmethod
+	def from_id(cls, weapon:str, count: int = 1):
+		for path in vehicle_data_loc.WEAPON_DATA.rglob(f"{weapon}.blkx"):
+			return cls.from_path(path, count)
+		_logger.error(f"Could not find sensor '{weapon}'")
+		return None
+	@classmethod
+	def from_path(cls, sensor: Path):
 		if not sensor.exists():
 			raise LookupError(f"Sensor file not found at {sensor}")
 		if sensor in _sensor_data_cache:
@@ -309,57 +403,92 @@ class Sensor:
 		else:
 			data = loads(sensor.read_text())
 			_sensor_data_cache[sensor] = data
-		self.name = ".".join(sensor.name.split(".")[:-1])
-		self.displayName = data.get("name")
-		self.type = data["type"]
-		self.maxTargets = data.get("weaponTargetsMax", -1)
+		name = ".".join(sensor.name.split(".")[:-1])
+		maxTargets = data.get("weaponTargetsMax", -1)
 
-		self.transivers = []
+		transivers = []
 		for k, v in data.get("transivers", {}).items():
-			self.transivers.append(self._transiversEntry(k, v))
+			transivers.append(cls._transiversEntry.from_json(k, v))
 
 		_ = data.get("illuminationTransmitter", {})
 		if _:
-			self.illuminationTransmitter = self._illuminationTransmitter(
+			illuminationTransmitter = cls._illuminationTransmitter(
 				_["power"],
-				self.Antenna(
+				cls.Antenna(
 					_["antenna"]["angleHalfSens"],
 					_["antenna"]["sideLobesSensitivity"]
 				)
 			)
 		else:
-			self.illuminationTransmitter = None
+			illuminationTransmitter = None
 
-		self.signals = []
+		signals = []
 		for k, v in data.get("signals", {}).items():
 			if k.lower() == "track":
-				self.track = v
+				track = v
 				continue
-			self.signals.append(self._signalEntry(k, v))
+			signals.append(cls._signalEntry.from_json(k, v))
 
-		self.scopeRangeSets = {}
+		scopeRangeSets = {}
 		for k, v in data.get("scopeRangeSets", {}).items():
-			self.scopeRangeSets[k] = [i for i in v]
+			scopeRangeSets[k] = [i for i in v]
 
 		tmp = {}
 		for k, v in data.get("scanPatternSets", {}).items():
 			tmp[k] = [i for i in v.values()]
-		self.scanPatterns = []
+		scanPatterns = []
 		for k, v in data.get("scanPatterns", {}).items():
 			patternSet = next((i for i, j in tmp.items() if k in j), None)
-			self.scanPatterns.append(self._scanPattern(k, v, patternSet))
+			scanPatterns.append(cls._scanPattern.from_data(k, v, patternSet))
 
-		self.sizeRanges = {}
-		self.vehicleTypeId = []
-		self.targetTypeId = []
+		sizeRanges = {}
+		vehicleTypeId = []
+		targetTypeId = []
 		for v in data.get("targetTypeId", []):
 			name:str = v.get("name").removeprefix("hud/")
-			if (sizeRange := sorted(v.get("sizeRange", []), reverse=True)):
-				self.sizeRanges[name] = _limit(sizeRange[0], sizeRange[1])
+			if (_:=v.get("sizeRange", [])):
+				sizeRanges[name] = _limit.from_list(_)
 			elif name in ["helicopter", "single prop", "multi prop", "single jet", "multi jet", "rocket"]:
-				self.vehicleTypeId.append(self._vehicleTypeId(v))
+				vehicleTypeId.append(cls._vehicleTypeId.from_json(v))
 			else:
-				self.targetTypeId.append(self._targetTypeId(v))
+				targetTypeId.append(cls._targetTypeId.from_json(v))
+
+		return cls(
+			data["type"],
+			name,
+			data.get("name"),
+			maxTargets,
+			tuple(transivers),
+			illuminationTransmitter,
+			tuple(signals),
+			None,
+			scopeRangeSets,
+			tuple(scanPatterns),
+			tuple(targetTypeId),
+			tuple(vehicleTypeId),
+			sizeRanges
+		)
+
+	def to_json(self):
+		obj = asdict(self)
+		for key, value in obj.items():
+			if isinstance(value, self._illuminationTransmitter):
+				obj[key] = value.to_json()
+			elif isinstance(value, tuple):
+				new = []
+				for item in value:
+					if isinstance(item, (self._transiversEntry, self._scanPattern, self._targetTypeId, self._targetTypeId, self._vehicleTypeId)):
+						new.append(item.to_json())
+					else:
+						# Just in case
+						new.append(item)
+				obj[key] = tuple(new)
+			elif isinstance(value, dict):
+				for k, v in value.items():
+					if isinstance(v, _limit):
+						obj[key][k] = v.to_json()
+
+		return obj
 
 @dataclass(slots=True)
 class Weapon:
@@ -379,12 +508,12 @@ class Weapon:
 			if not data:
 				return
 			return cls(
-				getMultipleKeys(data, "bombName", "bulletName", default=None),
-				getMultipleKeys(data, "bombType", "bulletType", default=0.0),
-				data.get("caliber", 0.0),
-				data.get("mass", 0.0),
-				getMultipleKeys(data, "maxSpeedInWater", "speed", "maxSpeed", default=0.0),
-				getMultipleKeys(data, "distToLive", "maxDistance", default=0.0),
+				getMultipleKeys(data, "bombName", "bulletName"),
+				getMultipleKeys(data, "bombType", "bulletType"),
+				data.get("caliber"),
+				_[0] if isinstance(_:=data.get("mass"), list) else _,
+				getMultipleKeys(data, "maxSpeedInWater", "speed", "maxSpeed"),
+				getMultipleKeys(data, "distToLive", "maxDistance"),
 				data.get("explosiveType"),
 				data.get("explosiveMass")
 			)
@@ -395,9 +524,17 @@ class Weapon:
 	ammo: tuple[_ammo] = tuple()
 
 	@classmethod
+	def from_id(cls, weapon:str, count: int = 1):
+		for path in vehicle_data_loc.WEAPON_DATA.rglob(f"{weapon}.blkx"):
+			return cls.from_path(path, count)
+		_logger.error(f"Could not find weapon '{weapon}'")
+		return None
+
+	@classmethod
 	def from_path(cls, weapon:Path, count: int = 1):
 
 		self = cls()
+		self.count = count
 
 		if not weapon.exists():
 			raise LookupError(f"Weapon file not found at {weapon}")
@@ -461,10 +598,10 @@ class Weapon:
 			
 			lowercase_keys = [i.lower() for i in data.keys()]
 
-			if isinstance(key_value, dict) or isinstance(key_value, list) and k.lower() == self.type:
+			if isinstance(key_value, dict) or isinstance(key_value, list) and k.lower() == key:
 				raw_ammo = key_value
-			elif isinstance(key_value, dict) and self.type in lowercase_keys:
-				raw_ammo = key_value.get(self.type)
+			elif isinstance(key_value, dict) and key in lowercase_keys:
+				raw_ammo = key_value.get(key)
 			
 			if not raw_ammo: 
 				continue
@@ -490,16 +627,139 @@ class Weapon:
 		}
 
 class Vehicle:
+	version: Version
 	identifier: str
-	rank: int
 	type: str
 	subtypes: list[str]
 	operator: str
 	tags: list[str]
 	vehicle_stats: dict[str, float]
 	release_date:datetime
-	sensors: list[Sensor]
-	weapons: list[Weapon] | None = None
+	sensors: list[str]
+
+	@dataclass(frozen=True, slots=True)
+	class _weapon:
+		"""A shorter, less computationally intensive weapon class. Holds less data"""
+		id: str
+		totalMass: int
+		totalCount: int
+		damage: int|None
+		weaponmask: int
+		reqModification: str|None = None
+		usedForCustomSlot: bool = False
+		guidance: str|None = None
+
+		@classmethod
+		def from_json(cls, id:str, data:dict[str, Any]):
+			guidance = getMultipleKeys(data, "aamGuidanceType", "atgmVisibilityType", "guidedBombVisibilityType")
+			if guidance == "default":
+				if "aamGuidanceType" in data:
+					guidance = "infraRed"
+				elif "atgmVisibilityType" in data:
+					guidance = "laser"
+				elif "guidedBombVisibilityType" in data:
+					raise NotImplementedError("Didn't implement default for this one yet")
+					guidance = ""
+			return cls(
+				id,
+				getMultipleKeys(data, "totalGuidedBombMass", "totalBombRocketMass"),
+				getMultipleKeys(data, "totalBombCount"),
+				data.get("weaponDamage"),
+				data.get("weaponmask"),
+				data.get("reqModification"),
+				data.get("isWeaponForCustomSlot", False),
+				guidance
+			)
+		def to_json(self):
+			return asdict(self)
+
+	@dataclass(frozen=True, slots=True)
+	class _defaultPreset:
+		id: str
+		totalDamage: int
+		mass: int|None
+		ammoCount: int|None
+		hasCountermeasures: bool
+		mass_per_sec: int
+		weaponmask: int
+		weapons: dict[str, dict[str, Vehicle._weapon|int]]
+
+		@classmethod
+		def from_json(cls, key:str, data:dict[str, Any], full_weapon_data:dict[str, dict[str, Any]]):
+			if any(key.startswith(i) for i in ["rocketguns", "containers", "bombguns", "equipment", "drop_tank", "custom_presets"]):
+				raise RuntimeError(f"Invalid key for default preset: {key}")
+			weapons = {}
+			for k,v in data.get("sum_weapons", {}).items():
+				weapons[k] = {
+					"weapon": Vehicle._weapon.from_json(k, full_weapon_data[k]),
+					"count": v
+				}
+			
+			return cls(
+				key,
+				data.get("weaponDamage"),
+				getMultipleKeys(data, "totalGuidedBombMass", "totalBombRocketMass"),
+				getMultipleKeys(data, "totalBombCount"),
+				data.get("hasCountermeasures", False),
+				data.get("mass_per_sec", 0),
+				data.get("weaponmask"),
+				weapons
+			)
+		def to_json(self):
+			obj = asdict(self)
+			for id, data in self.weapons.items():
+				for key, value in data.items():
+					if isinstance(value, Vehicle._weapon):
+						obj["weapons"][id][key] = value.to_json()
+
+			return obj
+	default_presets: tuple[_defaultPreset] | None = None
+
+	@dataclass(frozen=True, slots=True)
+	class _pylonData:
+		index: int
+		weapons: tuple[dict[str, Vehicle._weapon|int|dict[str, int]]]
+
+		@classmethod
+		def from_json(cls, data:dict[str, int|dict[str, int]], all_data:dict[str, Any]):
+			index = data.pop("index")
+
+			weapons = []
+			for k, v in data.items():
+				entry = {}
+				entry[k] = {}
+				for key, value in v.items():
+					if key == "DependentWeaponPreset":
+						entry[k]["dependsOn"] = {}
+						for name, idx in value.items():
+							entry[k]["dependsOn"][name] = idx
+					elif key == "BannedWeaponPreset":
+						entry[k]["bannedPreset"] = {}
+						for name, idx in value.items():
+							entry[k]["bannedPreset"][name] = idx
+					else:
+						entry[k][key] = Vehicle._weapon.from_json(value, all_data[key])
+				weapons.append(entry)
+			return cls(index, tuple(weapons))
+		def to_json(self):
+			new_weapons = []
+			for idx, weapon in enumerate(self.weapons):
+				new_weapons.append({})
+				for k, v in weapon.items():
+					if k == "dependsOn":
+						new_weapons[idx][k]["dependsOn"] = v
+					elif k == "bannedPreset":
+						new_weapons[idx][k]["bannedPreset"] = v
+					elif isinstance(v, Vehicle._weapon):
+						new_weapons[idx][k] = v.to_json()
+					else:
+						new_weapons[idx][k] = v
+
+			return {
+				"index": self.index,
+				"weapons": tuple(new_weapons)
+			}
+	pylon_configurations: tuple[_pylonData]
 
 	@dataclass(frozen=True, slots=True)
 	class _computer:
@@ -516,6 +776,9 @@ class Vehicle:
 		poi_memory: bool
 		aiming_point_memory: bool
 		gyro_sight: bool
+
+		def to_json(self):
+			return asdict(self)
 	computer:_computer
 	
 	@dataclass(frozen=True, slots=True)
@@ -532,6 +795,13 @@ class Vehicle:
 		sightTgtPodThermal: entry|None
 		gunnerIr: entry|None
 		pilotIr: entry|None
+
+		def to_json(self):
+			obj = asdict(self)
+			for key, value in obj.items():
+				if isinstance(value, self.entry):
+					obj[key] = asdict(value)
+			return obj
 	night_vision: _nightvision
 
 	@dataclass(frozen=True, slots=True)
@@ -567,7 +837,7 @@ class Vehicle:
 			)
 		def to_json(self):
 			return asdict(self)
-	modifications:list[_modification]
+	modifications:tuple[_modification]
 
 	@dataclass(frozen=True, slots=True)
 	class _wpcost:
@@ -650,18 +920,31 @@ class Vehicle:
 				tuple(_) if (_:=data.get("turretSpeed")) is not None else None,
 				data.get("showOnlyWhenBought", False)
 			)
+
+		def to_json(self):
+			obj = asdict(self)
+
+			for key, value in obj.items():
+				if isinstance(value, self._GamemodesSplit):
+					obj[key] = asdict(value)
+
+			return obj
 	economy: _wpcost
+	statcard_image: Path
+	techtree_image: Path
 
 	def __init__(
 		self, 
 		vehicle_paths:VehiclePaths, 
 		vehicleData:dict[str, Any], 
-		wpCost: dict[str, Any]
+		wpCost: dict[str, Any],
+		version: Version
 	):
 		self.__pathData = vehicle_paths
 		self.__vehicleData = vehicleData
 		self.__wpcost = wpCost
 		self.identifier = vehicle_paths.vehicle_id
+		self.version = version
 
 		self.sensors = []
 		self.tags = []
@@ -671,11 +954,15 @@ class Vehicle:
 		self._parse_economy()
 		self._get_vehicle_data()
 
+		self.statcard_image = vehicle_paths.images.statcard
+		self.techtree_image = vehicle_paths.images.techtree
+
 	@staticmethod
 	def convert_country(country_code:str) -> str:
 		return country_code.removeprefix("country_")
 
 	def _parse_economy(self):
+		# TODO: Add default preset parsing (wpcost.blkx 'unit_id > weapons')
 		self.economy = self._wpcost.from_json(self.__wpcost[self.identifier])
 
 		vehicleDataEntry:dict[str, str|dict] = self.__vehicleData.get(self.identifier)
@@ -706,11 +993,21 @@ class Vehicle:
 		else:
 			self.operator = self.economy.country
 
-	@dataclass(frozen=True, slots=True)
-	class _pylonData:
-		index: int
-		used_for_disbalance: bool
-		weapons: tuple[Weapon]
+		weaponry = self.__wpcost[self.identifier]["weapons"]
+		def_presets = []
+		pylons = []
+		for k, v in weaponry.items():
+			if (k.startswith(self.identifier)): # Default presets
+				def_presets.append(self._defaultPreset.from_json(k, v, weaponry))
+			elif (k == "custom_presets"): # Custom Presets
+				if isinstance(v["slot"], dict):
+					pylons.append(self._pylonData.from_json(v["slot"], weaponry))
+				else:
+					for pylon in v["slot"]:
+						pylons.append(self._pylonData.from_json(pylon, weaponry))
+		self.default_presets = tuple(def_presets)
+		self.pylon_configurations = tuple(pylons)
+		#endregion
 
 	def _get_vehicle_data(self):
 		data:dict[str, Any] = loads(self.__pathData.vehicleData.read_text())
@@ -782,83 +1079,45 @@ class Vehicle:
 			if isinstance(sensorsData["sensor"], dict):
 				blkname = sensorsData["sensor"].get("blk")
 				if blkname is not None:
-					self.sensors.append(Sensor(referenceToPath(blkname)))
+					self.sensors.append(referenceToPath(blkname).name.removesuffix(".blkx"))
 			else:
 				for sensor in sensorsData["sensor"]:
 					blkname:str = sensor.get("blk")
 					if blkname is None:
 						continue
-					self.sensors.append(Sensor(referenceToPath(blkname)))
+					self.sensors.append(referenceToPath(blkname).name.removesuffix(".blkx"))
 		elif "fireDirecting" in sensorsData:
 			pass # TODO: Navy stuff, no data retrieved currently
 		#endregion
-		self.weapons = self._get_weapons_data(data)
 
-		self.modifications = [self._modification.from_json(k, v) for k,v in data.get("modifications", {}).items()]
+		self.modifications = tuple([self._modification.from_json(k, v) for k,v in data.get("modifications", {}).items()])
 		pass
 
-	def _get_weapons_data(self, data:dict[str, Any]):
-		final_weapons: list[Weapon] = []
-		final_pylons: list[Vehicle._pylonData] = []
+	def to_json(self):
+		obj = {
+			"id": self.identifier,
+			"data_version": self.version,
+			"economy": self.economy.to_json(),
+			"modifications": [i.to_json() for i in self.modifications],
+			"nightvision": self.night_vision.to_json(),
+			"computers": self.computer.to_json(),
+			"release_date": self.release_date,
+			"type": self.type,
+			"subtypes": self.subtypes,
+			"operator": self.operator,
+			"tags": self.tags,
+			"stats": self.vehicle_stats,
+			"default_presets": tuple([i.to_json() for i in self.default_presets]) if self.default_presets else None,
+			"pylon_configurations": tuple([i.to_json() for i in self.pylon_configurations]) if self.pylon_configurations else None
+		}
+		return obj
 
-		if self.economy.has_customizable_weapons:
-			if data.get("commonWeapons", {}) == {}:
-				return final_weapons
+class UpdateAvailableError(Exception): 
+	"""An exception class for when a git update is available"""
+	def __init__(self, *args):
+		super().__init__(*args)
 
-			default_weapons:list[dict[str, dict]] = data.get("WeaponSlots", {}).get("WeaponSlot", [])
-			if len(default_weapons) == 0: 
-				return final_weapons
-
-			for pylon in default_weapons:
-				weapons = []
-				if isinstance((allowedWeapons := pylon.get("WeaponPreset")), list):
-					for weaponPart in pylon["WeaponPreset"]:
-						if "Weapon" not in weaponPart:
-							continue
-						if isinstance(weaponPart["Weapon"], dict):
-							if "dummy" in weaponPart["Weapon"]["blk"]:
-								continue
-							weapons.append(Weapon.from_path(referenceToPath(weaponPart["Weapon"]["blk"])))
-						elif isinstance(weaponPart["Weapon"], list):
-							for weapon in weaponPart["Weapon"]:
-								if "dummy" in weapon["blk"]:
-									continue
-								weapons.append(Weapon.from_path(referenceToPath(weapon["blk"])))
-				elif isinstance(allowedWeapons, dict):
-					if isinstance(allowedWeapons["Weapon"], dict):
-						weapons.append(Weapon.from_path(referenceToPath(allowedWeapons["Weapon"]["blk"])))
-					elif isinstance(allowedWeapons["Weapon"], list):
-						for weaponPart in allowedWeapons["Weapon"]:
-							if "dummy" in weaponPart["blk"]:
-								continue
-							weapons.append(Weapon.from_path(referenceToPath(weaponPart["blk"])))
-				final_pylons.append(
-					self._pylonData(
-						pylon["index"], 
-						pylon.get("notUseforDisbalanceCalculation", False),
-						tuple(weapons)
-					)
-				)
-			return final_pylons
-		else:
-			vehicle_file_weapons = data.get("commonWeapons", {}).get("Weapon", [])
-			if isinstance(vehicle_file_weapons, dict):
-				vehicle_file_weapons = [vehicle_file_weapons,]
-			
-			for weapon in vehicle_file_weapons:
-				path = weapon.get("blk")
-				if path is None:
-					_logger.warning(f"A weapon path for vehicle {data["model"]} not found")
-					continue
-				path = referenceToPath(path)
-				if path.name.endswith("dummy_weapon.blkx"):
-					continue
-				
-				weapon_details: Weapon = Weapon.from_path(path)
-				final_weapons.append(weapon_details)
-			return final_weapons
-
-async def processor(*vehicle_ids:str, get_all:bool = False) -> list[Vehicle]|None:
+async def processor(*vehicle_ids:str, get_all:bool = False, autoupdate_repo:bool = True) -> list[Vehicle]|None:
 	#region Pre-run checks
 	if not gamefiles.exists():
 		_logger.error(f"Directory {gamefiles} could not be found")
@@ -867,7 +1126,10 @@ async def processor(*vehicle_ids:str, get_all:bool = False) -> list[Vehicle]|Non
 		_logger.error(f"{gamefiles} doesn't have a git repository set up")
 		return None
 	version = Version(vehicle_data_loc.VERSION.read_text())
-	if (version < Version(get("https://raw.githubusercontent.com/gszabi99/War-Thunder-Datamine/refs/heads/master/version").text)):
+	git_version = Version(get("https://raw.githubusercontent.com/gszabi99/War-Thunder-Datamine/refs/heads/master/version").text)
+	if (version < git_version):
+		if not autoupdate_repo:
+			raise UpdateAvailableError(f"Update available for repository: {version} -> {git_version}")
 		sub_run("git pull", cwd=gamefiles, shell=True, check=True)
 		return await processor(*vehicle_ids, get_all=get_all)
 	#endregion
@@ -889,7 +1151,7 @@ async def processor(*vehicle_ids:str, get_all:bool = False) -> list[Vehicle]|Non
 		if paths is None:
 			continue
 		try:
-			vehicle_entries.append(Vehicle(paths, vehicleData, wpCost))
+			vehicle_entries.append(Vehicle(paths, vehicleData, wpCost, version))
 		except LookupError:
 			_logger.exception(f"Could not parse vehicle {id}")
 	end_time = perf_counter()
@@ -908,9 +1170,15 @@ if __name__ == '__main__':
 	)
 	loop = new_event_loop()
 	start_time = perf_counter()
-	#result = loop.run_until_complete(processor(get_all=True))
+	result = loop.run_until_complete(processor(get_all=True))
 	#result = loop.run_until_complete(processor("saab_jas39e", "saab_j21a_2", "tiger_uht", "germ_leopard_2k", "ussr_battlecruiser_izmail", "it_gabbiano_class"))
-	result = loop.run_until_complete(processor("saab_jas39e"))
+	#result = loop.run_until_complete(processor("saab_jas39e"))
 	end_time = perf_counter()
-	_logger.debug(f"Runtime took {end_time-start_time} seconds to parse {len(result)} entries")
+	_logger.debug(f"Fetching took {end_time-start_time} seconds to parse {len(result)} entries")
+
+	start_time = perf_counter()
+	results = [i.to_json() for i in result]
+	end_time = perf_counter()
+	_logger.debug(f"JSON conversion took {end_time-start_time} seconds to convert {len(result)} entries")
+		
 	pass

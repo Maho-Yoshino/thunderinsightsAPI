@@ -4,7 +4,9 @@ from asyncio import new_event_loop, set_event_loop
 async def runtime():
 	from . import Vehicles
 	vehicles = Vehicles()
-	await vehicles.get("saab_jas39e")
+	#await vehicles.setup()
+	await vehicles._write_vehicles("saab_jas39e")
+	result = await vehicles.get("saab_jas39e")
 	pass # Used for breakpoint
 	...
 def main():
