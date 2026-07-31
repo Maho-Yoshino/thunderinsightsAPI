@@ -1,3 +1,4 @@
+from asyncio import get_running_loop, Lock
 from logging import getLogger
 from typing import Literal, Any
 from pathlib import Path
@@ -6,22 +7,18 @@ from dataclasses import dataclass, asdict
 from re import compile
 from packaging.version import Version
 from .constants import *
-from requests import get
 from subprocess import run as sub_run
-from datetime import datetime
+from datetime import datetime, UTC
+from aiohttp import ClientSession
 from time import perf_counter
+from pandas import read_csv, DataFrame
 
 _logger = getLogger(__name__)
 
-def getMultipleKeys(obj:dict, *keys:str, default:Any = None, raise_on_missing:bool = False):
-	for key in keys:
-		if key in obj:
-			return obj[key]
-	if raise_on_missing:
-		raise KeyError("Could not find any of the keys provided within the object")
-	return default
 
+#region Module setup
 gamefiles = Path(__file__).parent / "gamefiles"
+CACHED_VALIDITY_UNTIL:int
 @dataclass(frozen=True, init=False)
 class DataLocations:
 	@dataclass(frozen=True, slots=True)
@@ -52,12 +49,98 @@ class DataLocations:
 	)
 	WEAPON_DATA: Path = gamefiles / "aces.vromfs.bin_u" / "gamedata" / "weapons"
 	VEHICLE_DATA: Path = gamefiles / "char.vromfs.bin_u" / "config" / "unittags.blkx"
+	SENSOR_DATA: Path = gamefiles / "aces.vromfs.bin_u" / "gamedata" / "sensors"
 	TT_LINES: Path = gamefiles / "char.vromfs.bin_u" / "config" / "shop.blkx"
 	WPCOST: Path = gamefiles / "char.vromfs.bin_u" / "config" / "wpcost.blkx"
+	LOC_META: Path = gamefiles / "lang.vromfs.bin_u" / "lang" / "localization.blkx"
 	VEHICLE_LOC: Path = gamefiles / "lang.vromfs.bin_u" / "lang" / "units.csv"
 	WEAPON_LOC: Path = gamefiles / "lang.vromfs.bin_u" / "lang" / "units_weaponry.csv"
+	MODIFICATION_LOC: Path = gamefiles / "lang.vromfs.bin_u" / "lang" / "units_modifications.csv"
 	VERSION: Path = gamefiles / "version"
 vehicle_data_loc = DataLocations()
+gamefiles.mkdir(exist_ok=True)
+if not (gamefiles / ".git").exists():
+	_logger.warning(f"{gamefiles} doesn't have a git repository set up. Setting up automatically")
+	tracked_paths = [ # Put a / before single files
+		"aces.vromfs.bin_u/gamedata/flightmodels",
+		"aces.vromfs.bin_u/gamedata/units/tankmodels",
+		"aces.vromfs.bin_u/gamedata/units/ships",
+		"aces.vromfs.bin_u/gamedata/sensors",
+		"aces.vromfs.bin_u/gamedata/weapons",
+		"atlases.vromfs.bin_u/units",
+		"/char.vromfs.bin_u/config/shop.blkx",
+		"/char.vromfs.bin_u/config/unittags.blkx",
+		"/char.vromfs.bin_u/config/wpcost.blkx",
+		"/lang.vromfs.bin_u/lang/localization.blkx",
+		"/lang.vromfs.bin_u/lang/units.csv",
+		"/lang.vromfs.bin_u/lang/units_weaponry.csv",
+		"/lang.vromfs.bin_u/lang/units_modifications.csv",
+		"tex.vromfs.bin_u/aircrafts",
+		"tex.vromfs.bin_u/ships",
+		"tex.vromfs.bin_u/tanks",
+		"/version"
+	]
+
+	sub_run(
+		"git clone --filter=blob:none --sparse https://github.com/gszabi99/War-Thunder-Datamine.git ./ &&" +
+		f"git sparse-checkout set --no-cone {" ".join(tracked_paths)}", 
+		check=True,
+		shell=True,
+		cwd=gamefiles
+	)
+	CACHED_VALIDITY_UNTIL = int(datetime.now(UTC).timestamp()) + 10*60
+else:
+	CACHED_VALIDITY_UNTIL = 0
+VERSION = Version((gamefiles / "version").read_text())
+REMOTE_VERSION_URL = "https://raw.githubusercontent.com/gszabi99/War-Thunder-Datamine/refs/heads/master/version"
+
+WPCOST: dict[str, dict[str, Any]] = loads(vehicle_data_loc.WPCOST.read_text())
+VEHICLE_DATA: dict[str, dict[str, Any]] = loads(vehicle_data_loc.VEHICLE_DATA.read_text())
+LOC_META: dict[str, str|list[str]|dict] = loads(vehicle_data_loc.LOC_META.read_text())
+
+UNIT_LOC: DataFrame = read_csv(vehicle_data_loc.VEHICLE_LOC, delimiter=';', encoding='utf-8')
+UNIT_LOC.set_index("<ID|readonly|noverify>", inplace=True)
+
+WEAPON_LOC = read_csv(vehicle_data_loc.WEAPON_LOC, delimiter=";", encoding="utf-8")
+WEAPON_LOC.set_index("<ID|readonly|noverify>", inplace=True)
+
+MOD_LOC = read_csv(vehicle_data_loc.MODIFICATION_LOC, delimiter=";", encoding="utf-8")
+MOD_LOC.set_index("<ID|readonly|noverify>", inplace=True)
+
+async def update_gamefiles():
+	global VERSION, CACHED_VALIDITY_UNTIL, UNIT_LOC, WEAPON_LOC, MOD_LOC, WPCOST, VEHICLE_DATA, LOC_META
+	if (CACHED_VALIDITY_UNTIL >= int(datetime.now(UTC).timestamp())):
+		return
+	CACHED_VALIDITY_UNTIL = int(datetime.now(UTC).timestamp()) + 10*60 # 10 minutes of cached version data
+	async with ClientSession() as session, session.get(REMOTE_VERSION_URL) as response:
+		remote_ver = Version(await response.text("utf-8"))
+	loop = get_running_loop()
+
+	await loop.run_in_executor(None, lambda: sub_run("git pull", cwd=gamefiles, shell=True, check=True))
+	VERSION = remote_ver
+
+	WPCOST = await loop.run_in_executor(None, lambda: loads(vehicle_data_loc.WPCOST.read_text()))
+	VEHICLE_DATA = await loop.run_in_executor(None, lambda: loads(vehicle_data_loc.VEHICLE_DATA.read_text()))
+	LOC_META = await loop.run_in_executor(None, lambda: loads(vehicle_data_loc.LOC_META.read_text()))
+	
+	UNIT_LOC = await loop.run_in_executor(None, lambda: read_csv(vehicle_data_loc.VEHICLE_LOC, delimiter=';', encoding='utf-8'))
+	UNIT_LOC.set_index("<ID|readonly|noverify>", inplace=True)
+
+	WEAPON_LOC = await loop.run_in_executor(None, lambda: read_csv(vehicle_data_loc.WEAPON_LOC, delimiter=";", encoding="utf-8"))
+	WEAPON_LOC.set_index("<ID|readonly|noverify>", inplace=True)
+
+	MOD_LOC = await loop.run_in_executor(None, lambda: read_csv(vehicle_data_loc.MODIFICATION_LOC, delimiter=";", encoding="utf-8"))
+	MOD_LOC.set_index("<ID|readonly|noverify>", inplace=True)
+	
+#endregion
+
+def getMultipleKeys(obj:dict, *keys:str, default:Any = None, raise_on_missing:bool = False):
+	for key in keys:
+		if key in obj:
+			return obj[key]
+	if raise_on_missing:
+		raise KeyError("Could not find any of the keys provided within the object")
+	return default
 
 csv_vehicle_pattern = compile(r"^(?P<base>[A-Za-z0-9_-]+?)(?:_(?P<variant>shop|[0-3]))?$")
 @dataclass(frozen=True, slots=True)
@@ -287,7 +370,7 @@ class Sensor:
 
 		@classmethod
 		def from_json(cls, _type:str, data:dict[str, Any]):
-			cls(
+			return cls(
 				_type,
 				data.get("groundClutter", True),
 				data.get("aircraftAsTarget", True),
@@ -387,21 +470,21 @@ class Sensor:
 	vehicleTypeId: tuple[_vehicleTypeId]
 	sizeRanges: dict[str, _limit]
 
-
 	@classmethod
-	def from_id(cls, weapon:str, count: int = 1):
-		for path in vehicle_data_loc.WEAPON_DATA.rglob(f"{weapon}.blkx"):
-			return cls.from_path(path, count)
-		_logger.error(f"Could not find sensor '{weapon}'")
+	async def from_id(cls, sensor:str):
+		for path in vehicle_data_loc.SENSOR_DATA.rglob(f"{sensor}.blkx"):
+			return await cls.from_path(path)
+		_logger.error(f"Could not find sensor '{sensor}'")
 		return None
 	@classmethod
-	def from_path(cls, sensor: Path):
+	async def from_path(cls, sensor: Path):
 		if not sensor.exists():
 			raise LookupError(f"Sensor file not found at {sensor}")
 		if sensor in _sensor_data_cache:
 			data = _sensor_data_cache[sensor]
 		else:
-			data = loads(sensor.read_text())
+			loop = get_running_loop()
+			data = await loop.run_in_executor(None, lambda: loads(sensor.read_text()))
 			_sensor_data_cache[sensor] = data
 		name = ".".join(sensor.name.split(".")[:-1])
 		maxTargets = data.get("weaponTargetsMax", -1)
@@ -461,7 +544,7 @@ class Sensor:
 			tuple(transivers),
 			illuminationTransmitter,
 			tuple(signals),
-			None,
+			track,
 			scopeRangeSets,
 			tuple(scanPatterns),
 			tuple(targetTypeId),
@@ -520,21 +603,21 @@ class Weapon:
 
 	name: str = None
 	type: str = None
-	count: int = 1
 	ammo: tuple[_ammo] = tuple()
 
 	@classmethod
-	def from_id(cls, weapon:str, count: int = 1):
+	async def from_id(cls, weapon:str):
+		for i in ["drop_tank","rocketguns","containers","bombguns","equipment"]:
+			weapon = weapon.removeprefix(i+"_")
 		for path in vehicle_data_loc.WEAPON_DATA.rglob(f"{weapon}.blkx"):
-			return cls.from_path(path, count)
+			return await cls.from_path(path)
 		_logger.error(f"Could not find weapon '{weapon}'")
 		return None
 
 	@classmethod
-	def from_path(cls, weapon:Path, count: int = 1):
+	async def from_path(cls, weapon:Path):
 
 		self = cls()
-		self.count = count
 
 		if not weapon.exists():
 			raise LookupError(f"Weapon file not found at {weapon}")
@@ -542,7 +625,8 @@ class Weapon:
 		if weapon in _weapon_data_cache:
 			weapon_blk = _weapon_data_cache[weapon]
 		else:
-			weapon_blk = loads(weapon.read_text())
+			loop = get_running_loop()
+			weapon_blk = await loop.run_in_executor(None, lambda: loads(weapon.read_text()))
 			_weapon_data_cache[weapon] = weapon_blk
 		
 		self.name = ".".join(weapon.name.split(".")[:-1])
@@ -583,14 +667,14 @@ class Weapon:
 			self.type = BOOSTER_NAME
 		elif is_container:
 			self.type = CONTAINER_NAME
-			return self.from_path(referenceToPath(weapon_blk["blk"]), weapon_blk["bullets"])
+			return await self.from_path(referenceToPath(weapon_blk["blk"]))
 		elif is_extfueltank:
 			self._get_ammo("payload", weapon_blk)
 			self.type = EXTFUELTANK_NAME
 
 		return self
 
-	def _get_ammo(self, key:str, data:dict[str, Any]) -> set[Weapon._ammo]:
+	def _get_ammo(self, key:str, data:dict[str, Any]):
 		ammo_list = []
 		for k in data.keys():
 			raw_ammo = None
@@ -622,7 +706,6 @@ class Weapon:
 		return {
 			"weapon": self.name,
 			"type": self.type,
-			"count": self.count,
 			"ammo": [asdict(i) for i in self.ammo]
 		}
 
@@ -722,10 +805,14 @@ class Vehicle:
 
 		@classmethod
 		def from_json(cls, data:dict[str, int|dict[str, int]], all_data:dict[str, Any]):
-			index = data.pop("index")
+			index = data.get("index")
+			if (index is None):
+				raise LookupError("No index value for pylon")
 
 			weapons = []
 			for k, v in data.items():
+				if k == "index":
+					continue
 				entry = {}
 				entry[k] = {}
 				for key, value in v.items():
@@ -930,21 +1017,30 @@ class Vehicle:
 
 			return obj
 	economy: _wpcost
+
+	@dataclass(frozen=True, slots=True)
+	class Localization:
+		language: str
+		short: str
+		long: str
+
+		def to_json(self):
+			return {self.language: {
+				"short": self.short,
+				"long": self.long
+			}}
+
+	localizations: tuple[Localization]
 	statcard_image: Path
 	techtree_image: Path
 
 	def __init__(
 		self, 
-		vehicle_paths:VehiclePaths, 
-		vehicleData:dict[str, Any], 
-		wpCost: dict[str, Any],
-		version: Version
+		vehicle_paths:VehiclePaths,
+		data:dict[str, Any]
 	):
-		self.__pathData = vehicle_paths
-		self.__vehicleData = vehicleData
-		self.__wpcost = wpCost
 		self.identifier = vehicle_paths.vehicle_id
-		self.version = version
+		self.version = VERSION
 
 		self.sensors = []
 		self.tags = []
@@ -952,20 +1048,70 @@ class Vehicle:
 		self.modifications = []
 
 		self._parse_economy()
-		self._get_vehicle_data()
+		self._parse_unittags()
+		self._parse_data(data)
+		self._parse_localization()
 
 		self.statcard_image = vehicle_paths.images.statcard
 		self.techtree_image = vehicle_paths.images.techtree
+
+	@classmethod
+	async def from_id(cls, vehicle_id:str):
+		await update_gamefiles()
+		paths = get_vehicle_paths(vehicle_id)
+		if paths == None:
+			raise LookupError(f"Could not find vehicle '{vehicle_id}'")
+		loop = get_running_loop()
+		data:dict[str, Any] = await loop.run_in_executor(None, lambda: loads(paths.vehicleData.read_text()))
+		return cls(paths, data)
 
 	@staticmethod
 	def convert_country(country_code:str) -> str:
 		return country_code.removeprefix("country_")
 
-	def _parse_economy(self):
-		# TODO: Add default preset parsing (wpcost.blkx 'unit_id > weapons')
-		self.economy = self._wpcost.from_json(self.__wpcost[self.identifier])
+	async def get_sensors(self) -> tuple[Sensor]:
+		sensors = []
+		for sensor in self.sensors:
+			sensors.append(await Sensor.from_id(sensor))
+		return tuple(sensors)
 
-		vehicleDataEntry:dict[str, str|dict] = self.__vehicleData.get(self.identifier)
+	async def get_weapons(self) -> dict[str, dict[str, Weapon]]:
+		weapons = {
+			"default": {},
+			"custom": {}
+		}
+		for preset in self.default_presets:
+			for weapon in preset.weapons:
+				if weapon in weapons["default"]:
+					continue
+				weapons["default"][weapon] = await Weapon.from_id(weapon)
+		for pylon in self.pylon_configurations:
+			for preset in pylon.weapons:
+				for loadout in preset.values():
+					for name in loadout:
+						if name in ["dependsOn", "BannedPreset"]:
+							continue
+						weapons["custom"][name] = await Weapon.from_id(name)
+
+		return weapons
+
+	def _parse_localization(self):
+		localizations = []
+
+		long_line = UNIT_LOC.loc[f"{self.identifier}_shop"]
+		short_line = UNIT_LOC.loc[f"{self.identifier}_0"]
+		languages = LOC_META["text_translation"]["lang"]
+		for lang in languages:
+			localizations.append(self.Localization(
+				lang,
+				short_line.get(f"<{lang}>"),
+				long_line.get(f"<{lang}>")
+			))
+
+		self.localizations = tuple(localizations)
+
+	def _parse_unittags(self):
+		vehicleDataEntry:dict[str, str|dict] = VEHICLE_DATA.get(self.identifier)
 		if (vehicleDataEntry is None):
 			return
 		self.vehicle_stats = vehicleDataEntry.get("Shop")
@@ -991,9 +1137,12 @@ class Vehicle:
 			else:
 				self.operator = self.convert_country(vehicleDataEntry["operatorCountry"])
 		else:
-			self.operator = self.economy.country
+			self.operator = self.economy.country or None
 
-		weaponry = self.__wpcost[self.identifier]["weapons"]
+	def _parse_economy(self):
+		self.economy = self._wpcost.from_json(WPCOST[self.identifier])
+
+		weaponry = WPCOST[self.identifier]["weapons"]
 		def_presets = []
 		pylons = []
 		for k, v in weaponry.items():
@@ -1009,8 +1158,7 @@ class Vehicle:
 		self.pylon_configurations = tuple(pylons)
 		#endregion
 
-	def _get_vehicle_data(self):
-		data:dict[str, Any] = loads(self.__pathData.vehicleData.read_text())
+	def _parse_data(self, data: dict):
 		self.computer = self._computer(
 			gun_ccip = data.get("haveCCIPForGun", False),
 			turret_ccip = data.get("haveCCIPForTurret", False),
@@ -1065,8 +1213,8 @@ class Vehicle:
 				tmp["pilotIr"]["generation"],
 				tmp["pilotIr"]["noiseFactor"],
 				-1,
-				tmp["gunnerIr"]["ghosting"],
-				tmp["gunnerIr"]["lightMult"]
+				tmp["pilotIr"]["ghosting"],
+				tmp["pilotIr"]["lightMult"]
 			) if tmp.get("pilotIr") is not None else None
 		)
 		#endregion
@@ -1094,6 +1242,9 @@ class Vehicle:
 		pass
 
 	def to_json(self):
+		langs = {}
+		for loc in self.localizations:
+			langs.update(loc.to_json())
 		obj = {
 			"id": self.identifier,
 			"data_version": self.version,
@@ -1108,7 +1259,9 @@ class Vehicle:
 			"tags": self.tags,
 			"stats": self.vehicle_stats,
 			"default_presets": tuple([i.to_json() for i in self.default_presets]) if self.default_presets else None,
-			"pylon_configurations": tuple([i.to_json() for i in self.pylon_configurations]) if self.pylon_configurations else None
+			"pylon_configurations": tuple([i.to_json() for i in self.pylon_configurations]) if self.pylon_configurations else None,
+			"localizations": langs, 
+			"sensors": self.sensors
 		}
 		return obj
 
@@ -1117,49 +1270,24 @@ class UpdateAvailableError(Exception):
 	def __init__(self, *args):
 		super().__init__(*args)
 
-async def processor(*vehicle_ids:str, get_all:bool = False, autoupdate_repo:bool = True) -> list[Vehicle]|None:
-	#region Pre-run checks
-	if not gamefiles.exists():
-		_logger.error(f"Directory {gamefiles} could not be found")
-		return None
-	if not (gamefiles / ".git").exists():
-		_logger.error(f"{gamefiles} doesn't have a git repository set up")
-		return None
-	version = Version(vehicle_data_loc.VERSION.read_text())
-	git_version = Version(get("https://raw.githubusercontent.com/gszabi99/War-Thunder-Datamine/refs/heads/master/version").text)
-	if (version < git_version):
-		if not autoupdate_repo:
-			raise UpdateAvailableError(f"Update available for repository: {version} -> {git_version}")
-		sub_run("git pull", cwd=gamefiles, shell=True, check=True)
-		return await processor(*vehicle_ids, get_all=get_all)
-	#endregion
-
-	wpCost: dict[str, dict[str, Any]] = loads(vehicle_data_loc.WPCOST.read_text())
-	#region Path Obtaining
-	if get_all:
-		vehicle_ids = [k for k in wpCost.keys() if k != "economicRankMax"]
-	#endregion
-	vehicleData = loads(vehicle_data_loc.VEHICLE_DATA.read_text())
-	#region Vehicle parsing
+async def getAllVehicleIDs() -> tuple[str]:
+	await update_gamefiles()
+	return [k for k in WPCOST.keys() if k != "economicRankMax"]
+async def processVehicles(*vehicle_ids:str) -> tuple[Vehicle]:
+	await update_gamefiles()
 	start_time = perf_counter()
 	vehicle_entries = []
 	for id in vehicle_ids:
-		if id not in wpCost:
+		if id not in WPCOST:
 			_logger.error(f"Invalid vehicle ID: '{id}'")
 			continue
-		paths = get_vehicle_paths(id)
-		if paths is None:
-			continue
 		try:
-			vehicle_entries.append(Vehicle(paths, vehicleData, wpCost, version))
+			vehicle_entries.append(await Vehicle.from_id(id))
 		except LookupError:
 			_logger.exception(f"Could not parse vehicle {id}")
 	end_time = perf_counter()
 	_logger.debug(f"Vehicle parsing took {round(end_time-start_time, 2)} seconds")
-	#endregion
-
-	return vehicle_entries
-
+	return tuple(vehicle_entries)
 
 if __name__ == '__main__':
 	from logging import DEBUG, basicConfig
@@ -1170,9 +1298,9 @@ if __name__ == '__main__':
 	)
 	loop = new_event_loop()
 	start_time = perf_counter()
-	result = loop.run_until_complete(processor(get_all=True))
-	#result = loop.run_until_complete(processor("saab_jas39e", "saab_j21a_2", "tiger_uht", "germ_leopard_2k", "ussr_battlecruiser_izmail", "it_gabbiano_class"))
-	#result = loop.run_until_complete(processor("saab_jas39e"))
+	#result = loop.run_until_complete(processVehicles(*loop.run_until_complete(getAllVehicleIDs())))
+	#result = loop.run_until_complete(processVehicles("saab_jas39e", "saab_j21a_2", "tiger_uht", "germ_leopard_2k", "ussr_battlecruiser_izmail", "it_gabbiano_class"))
+	result = loop.run_until_complete(processVehicles("saab_jas39e"))
 	end_time = perf_counter()
 	_logger.debug(f"Fetching took {end_time-start_time} seconds to parse {len(result)} entries")
 

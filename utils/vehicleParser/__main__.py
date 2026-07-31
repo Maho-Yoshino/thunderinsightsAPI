@@ -5,8 +5,9 @@ async def runtime():
 	from . import Vehicles
 	vehicles = Vehicles()
 	#await vehicles.setup()
-	await vehicles._write_vehicles("saab_jas39e")
-	result = await vehicles.get("saab_jas39e")
+	result = await vehicles.getVehicle("saab_jas39e")
+	tmp1 = result.get_sensors()
+	tmp2 = result.get_weapons()
 	pass # Used for breakpoint
 	...
 def main():
