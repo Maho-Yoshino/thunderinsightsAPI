@@ -512,6 +512,257 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 - Response  
 	- Some sort of token in the first line  
 	- Second line is an URL to downloading the .zip of the update  
+## Marketplace endpoints  
+- The titles of the sections are to be used as an `action` form value to get the desired data, unless specified otherwise  
+- Every `POST` request must have a `token` form value for authentication  
+- Every `POST` request must have an `appId` value given (`1067` is WT)  
+### json  
+- All endpoints in this category point to `https://market-proxy.gaijin.net/json`  
+#### cln_filter_blocked_pairs  
+- `POST` request  
+- Form data  
+	- `transactid`  
+	- `reqstamp`  
+	- `list` (array of dicts)  
+		- `appId` (`1067` for WT)  
+		- `marketName` (e.g. `id100150_tusk_force_trophy`)  
+- Response (array of dicts)  
+	- `appId`  
+	- `marketName`  
+	- `mode`  
+	- `affectAfterSec`  
+### web  
+- All endpoints in this category point to `https://market-proxy.gaijin.net/web`  
+#### cln_get_app_tags  
+- `POST` request  
+- Host `https://market-proxy.gaijin.net/web`  
+- Form data  
+	- `count` (items per page)  
+	- `skip` (for pagination)  
+	- `country`  
+#### cln_market_info  
+- `POST` request  
+- Form data  
+	- `token`  
+	- `action`  
+- Gets metadata about marketplace actions  
+	- Gaijin's fee  
+	- min/max possible price  
+	- min/max auction duration  
+	- supported games  
+#### cln_get_pair_stat  
+- `POST` request  
+- Form data  
+	- `market_name` (essentially `id100148_leviathans_trophy` from the url `https://trade.gaijin.net/market/1067/id100148_leviathans_trophy?assetId=6106171621`)  
+	- `currencyid` (`gjn`)  
+- Gets the price graph  
+- Returns an dict  
+	- `1d` (`Whole time` graph)  
+	- `1h` (`Short range` graph)  
+	- Each one has a list of arrays attached  
+		- i[0] is timestamp  
+		- i[1] is price (*10000)  
+		- i[2] is amount placed on marketplace  
+#### cln_books_brief  
+- `POST` request  
+- Form data  
+	- `market_name` (same as before)  
+- Response  
+	- `type`  
+	- `BUY`  
+	- `SELL`  
+	- `depth`  
+	- `BUY` and `SELL` are arrays of arrays  
+		- i[0] is price (*10000)  
+		- i[1] is quantity  
+	- `depth` is a dict which shows how many total orders are there  
+		- `BUY` - Buy orders  
+		- `SELL` - Sell orders  
+#### cln_get_user_history  
+- `POST` request  
+- Form data  
+	- `count` (how many per request)  
+	- `skip` (for pagination)  
+- Response  
+	- `events` is an array of dicts  
+		- `id`  
+		- `ts` (timestamp)  
+		- `count`  
+		- `price`  
+		- `cancelReason` (when applicable)  
+		- `currency` (`gjn`)  
+		- `dealUid`  
+		- `orderId`  
+		- `event`  
+			- `cancel`  
+			- `new`  
+			- `deal`  
+		- `type` (`SELL` or `BUY`)  
+		- `appid` (`1067` for WT)  
+		- `hashname`  
+		- `auction`  
+		- `seen`  
+#### cln_get_user_open_orders  
+#### cln_market_sell  
+- `POST` request  
+- Form data  
+	- `transactid`  
+	- `reqstamp` (request timestamp)  
+	- `appid` (`1067` for WT)  
+	- `contextid` (`1`)  
+	- `assetid`  
+	- `amount` (int in a string)  
+	- `currencyid` (`gjn`)  
+	- `price` (*10000)  
+	- `seller_should_get` (*10000)  
+	- `agree_stamp` (timestamp)  
+	- `privateMode` (appear as anonymous, boolean)  
+#### cln_market_search  
+- `POST` request  
+- Form data  
+	- `count` (Amount per request)  
+	- `skip` (for pagination)  
+	- `text` (For direct searching, leave as empty string for all)  
+	- `options` (`;` separated tags)  
+		- `any_sell_orders`  
+		- `any_buy_orders`  
+		- `include_marketpairs`  
+	- `appid_filter` (`1067` for WT, `appId` can be omitted here)  
+- Response  
+	- `assets` contains the vehicle data, it is an array of dicts  
+		- `appid` (basically always `1067` if you filter by it)  
+		- `hash_name` (e.g. `id10051_heavy_cavalry_key`)  
+		- `name` (display name, `'Heavy Cavalry' key`)  
+		- `commodity` (boolean value)  
+		- `icon` (vehicle icon URL)  
+		- `price` (lowest sell price *100 000 000)  
+		- `buyprice` (highest buy price *100 000 000)  
+		- `buydepth` (amount of buy orders)  
+		- `tags` (array of tags)  
+			- `type:(.+)`  
+			- `quality:(.+)`  
+			- `countryDenyPurchase:be_kr_br`  
+			- `eventName:(.+)`  
+			- `country:(.+)`  
+			- `inGamePreview:yes`  
+		- `asset_class` (array of dicts)  
+			- `name`  
+				- `__itemdefid`  
+			- `value` - Vehicle ID (e.g. `"50068"`)  
+		- `color` (HEX value for the background, e.g. `C816C1` for epic items)  
+#### cln_market_get_asset_class  
+- `POST` request  
+- Form data  
+	- `name` (hash name)  
+- Response  
+	- `asset_class` is an array of dicts  
+		- `name` (`__itemdefid`)  
+		- `value` (int in a string, e.g. `"100150"`)  
+### char  
+- All endpoints in this category point to `https://market-proxy.gaijin.net/char`  
+#### cln_get_general_blk  
+- `POST` request  
+- Headers  
+	- `token`  
+	- `blkType`  
+		- `GBT_GENERAL_SETTINGS`  
+		- `FAVORITES`  
+- Returns values based on the `blkType` header  
+#### cln_set_general_blk  
+- `POST` request  
+- Used for setting the values in `cln_get_general_blk`  
+- Headers  
+	- `token`  
+	- `blkType`  
+		- Same as previously  
+- Form data (dict)  
+	- `favorites` (array of dicts)  
+		- `appId` (`1067` for WT)  
+		- `hashName`  
+		- `dateAdded` (date when favorited, UTC time)  
+- Response: `!OK`  
+### market  
+- All endpoints in this category point to `https://market-proxy.gaijin.net/market`  
+#### cmn_check_user_auth  
+- `POST` request  
+- Host `https://market-proxy.gaijin.net/market`  
+- Returns metadata about the logged in user, for example  
+	- `mail`  
+	- `nick`  
+	- `roles` (e.g. `CLIENT` and `ANONYMOUS`)  
+	- `userId`  
+#### cancel_order  
+- `POST` request  
+- Form data  
+	- `transactid`  
+	- `reqstamp`  
+	- `pairId`  
+	- `orderId`  
+### assetAPI  
+- All endpoints in this category point to `https://market-proxy.gaijin.net/assetAPI`  
+#### GetContexts  
+- `POST` request  
+- No clue what purpose this endpoint serves, apparently has something to do with the inventory  
+#### GetContextContents  
+- `POST` request  
+- Form data  
+	- `contextid` (just set it to 1)  
+- Gets the contents of your inventory  
+#### GetAssetClassInfo  
+- `POST` request  
+- Form data  
+	- `class_name0` (`__itemdefid`)  
+	- `class_value0` (vehicle ID)  
+	- `class_count` (no clue what this is supposed to be)  
+- Gets data about the marketplace item  
+### View vehicle  
+- `POST` request  
+- Host `https://login.gaijin.net/proxy/api/matching/notifyClient`  
+- Does not need `View vehicle` provided anywhere  
+- Headers  
+	- `Authorization` (Bearer {insert token})  
+- Could not test as the endpoint refused to work  
+## Replay endpoints  
+### https://wt-replays-cdnnow.cdn.gaijin.net/{match ID HEX}/xxxx.wrpl  
+- `GET` request  
+- Requires no authentication  
+- Returns a `wrpl` file  
+### https://warthunder.com/en/api/replay  
+- `POST` request  
+- Request body  
+	- `findMissionValue`  
+	- `findUserType`  
+		- `USERNAME`  
+		- `ID`  
+	- `findUserValue` (what to search)  
+	- `gameMode` (array of values)  
+		- `arcade`  
+		- `realistic`  
+		- `simulation`  
+	- `gameType`  
+		- `randomBattle`  
+		- `squadron_tournament`  
+		- `clanBattle`  
+		- `tournaments`  
+	- `isUserOwnReplays`  
+	- `limit` (how many per page)  
+	- `page` (pagination)  
+	- `rankRange`  
+	- `techType`  
+		- `all`  
+		- `aircraft`  
+		- `helicopter`  
+		- `tank`  
+		- `ship`  
+		- `mixed`  
+	- `timeRangeFrom`  
+	- `timeRangeFromDay` (int)  
+	- `timeRangeFromMonth` (int)  
+	- `timeRangeFromTime` (%H:%M formatted string)  
+	- `timeRangeTo`  
+	- `timeRangeToDay`  
+	- `timeRangeToMonth`  
+	- `timeRangeToTime` (same as before)  
 ## Other endpoints  
 ### https://auth.gaijinent.com/login.php  
 - `POST` request  
@@ -692,10 +943,6 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 			- `discard` (GE vehicle)  
 			- `publisher` (Pack vehicle)  
 ### https://login.gaijin.net/en/sso/getShortToken  
-### https://wt-replays-cdnnow.cdn.gaijin.net/{match ID HEX}/xxxx.wrpl  
-- `GET` request  
-- Requires no authentication  
-- Returns a `wrpl` file  
 ## Endpoints not used ingame  
 ### http://newslist.gaijin.net:8080/news/warthunder/en/js  
 ### https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/\[pagenum\]/sort/dr_era5  

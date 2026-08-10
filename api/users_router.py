@@ -1,11 +1,12 @@
 from os import getenv
 from typing_extensions import Annotated
-from fastapi import APIRouter, Path, Query, Request
+from fastapi import APIRouter, Path, Query, Request as faRequest, Depends
 from fastapi.responses import JSONResponse
 from urllib.parse import unquote
-from api.shared import get_request
+from tools import Request
+from utils.auth import UserTokenCache
 from api.models import Users
-from api.shared import TokenString, limiter
+from api.shared import limiter, get_auth
 from api.backends.users import *
 
 router = APIRouter(
@@ -14,55 +15,56 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
-@router.post("/terse", summary="Get several users by ID")
+@router.get("/terse", summary="Get several users by ID")
 @limiter.shared_limit("users", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_users_terse_info(
-    request: Request,
-    token: TokenString,
+    request: faRequest,
     id: Annotated[list[int], Query(
         title="The ID of the users to get information about", 
         description="Provide multiple IDs to get information about multiple users at once",
         min_length=1, 
         max_length=50)
-    ]
+    ],
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> dict[str, Users.TerseReturnModel]:
     """Get terse information about users by their IDs."""
-    return JSONResponse(await get_terse(token, *id))
+    return JSONResponse(await get_terse(user, *id))
 
-@router.post("/{userid}", summary="Get user by ID")
+@router.get("/{userid}", summary="Get user by ID")
 @limiter.shared_limit("users", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_user_direct(
-    request: Request,
-    token: TokenString,
-    userid: Annotated[int, Path(title="The ID of the user to get information about", description="The ID of the user to get information about", gt=0)]
+    request: faRequest,
+    userid: Annotated[int, Path(title="The ID of the user to get information about", description="The ID of the user to get information about", gt=0)],
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> Users.getUserDirectModel:
-    response = await (await get_request(
-        token, 
-        "get_public_userstat",
-        userId = userid
-    )).send()
-    return JSONResponse(response)
+    return JSONResponse(
+        await Request.send_template(
+            user, 
+            "get_public_userstat",
+            userId = userid
+        )
+    )
 
-@router.post(
+@router.get(
     "/search/{nick}", 
     summary="Get users by name",
     responses={}
 )
 @limiter.shared_limit("users", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_users_search(
-    request: Request,
-    token: TokenString,
+    request: faRequest,
     nick: Annotated[str, Path(title="The nickname to search for")], 
-    limit: Annotated[int, Query(title="How many users to retrieve", ge=2, le=50)] = 10
+    limit: Annotated[int, Query(title="How many users to retrieve", ge=2, le=50)] = 10,
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> dict[str, Users.TerseReturnModel]:
-    response = await (await get_request(
-        token, 
+    response = await Request.send_template(
+        user, 
         "find_users_by_nick_prefix",
         body={
             "nick": unquote(nick),
             "maxCount": limit
         }
-    )).send()
+    )
 
-    terseInfo = await get_terse(token, *list(response.keys()))
+    terseInfo = await get_terse(user, *list(response.keys()))
     return JSONResponse(terseInfo)

@@ -11,7 +11,6 @@ TEMPLATES: list[str] = _tpls
 
 _cache: dict[str, dict] = {}
 
-
 def load(action: str) -> dict:
     if action in _cache:
         return _cache[action]
@@ -23,10 +22,8 @@ def load(action: str) -> dict:
     _cache[action] = data
     return data
 
-
 def reload() -> None:
     _cache.clear()
-
 
 if __name__ == "__main__":
     print("Available:", TEMPLATES)

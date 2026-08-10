@@ -1,16 +1,15 @@
 from __future__ import annotations
-import asyncio
-from re import sub as re_sub
+from re import sub as re_sub, search as re_search
 from logging import getLogger
 from asyncio import sleep
+from aiohttp import ClientSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.job import Job
 from aiosqlite import connect, Row, OperationalError
-from os import getenv
+from os import getenv, urandom
 from datetime import UTC, datetime, timedelta
-from aiohttp import ClientSession, ClientResponse
-from typing import Any
+from typing import Any, ClassVar
 from fastapi import HTTPException
 from hashlib import sha256
 from secrets import token_urlsafe
@@ -18,11 +17,14 @@ from pathlib import Path
 from enum import StrEnum
 from contextlib import asynccontextmanager
 from random import randint
-from json import loads
 from jwt import decode as jwt_decode
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, field
+from base64 import b64encode
+from hashlib import md5
+from tools import Request
 
 from utils.helper import StringTimeToTimedelta, dtToTimestamp
+from utils.network import NetworkManager
 
 _logger = getLogger(__name__)
 
@@ -80,10 +82,24 @@ def jwt_get_data(jwt:str) -> jwtData:
 	)
 # region User Tokens Cache and refresh
 
-class UserTokenCache:
-	scheduler: AsyncIOScheduler
-	class dbSchema(StrEnum):
-		TABLE = "tokens"
+@dataclass(frozen=True, slots=True)
+class _sidValue:
+	sid: str
+	sid_expires: datetime
+
+class dbSchema:
+	class _table(StrEnum):
+		__table__: ClassVar[str]
+
+		@classmethod
+		def t(cls) -> str:
+			return cls.__table__
+		@classmethod
+		def q(cls, column: "dbSchema._table") -> str:
+			return f"{cls.__table__}.{column.value}"
+	class tokens(_table):
+		__table__ = "tokens"
+
 		HASH = "hash_token"
 		EMAIL = "email"
 		JWT = "jwt"
@@ -94,38 +110,96 @@ class UserTokenCache:
 		LAST_USED = "last_used"
 		CREATED = "created_at"
 
+	class sso_sessions(_table):
+		__table__ = "sso_sessions"
+
+		EMAIL = "email"
+		SID = "sid"
+		SID_EXP = "exp"
+
+class UserTokenCache:
+	scheduler: AsyncIOScheduler
+
+	@dataclass(slots=True)
 	class Entry: # Short lived data class with some helper methods
+		@dataclass(slots=True)
+		class sid_entry:
+			sid: str
+			exp: datetime
+			@classmethod
+			def from_row(cls, row:Row):
+				try:
+					return cls(
+						row[dbSchema.sso_sessions.SID],
+						datetime.fromtimestamp(row[dbSchema.sso_sessions.SID_EXP], UTC)
+					)
+				except (KeyError, TypeError):
+					return
+			def to_json(self):
+				return asdict(self)
+
+		_parent: UserTokenCache
+
 		hashed: str
 		jwt: str # Session token
 		jwt_expires: datetime # Inferred from jwt
-		session_token_expires: datetime # Session token expiry
 		user_token: str # User token
 		last_used: datetime # Used for invalidating old tokens
-		uidHint: int = -1 # uidHint value for refresh and other auth calls
+		uidHint: int # uidHint value for refresh and other auth calls
 		email:str # For contact purposes
 		requests_count: int = 0 # For token statistics (and to find abuse)
-
-		__saved:dict[str, str|int|datetime] # Saved to file state, used for comparing what to change
+		sid:sid_entry | None = None
+		__saved:dict[str, str|int|datetime] = field(default_factory=dict) # Saved to file state, used for comparing what to change
 	
-		def __init__(self, row:Row, parent:'UserTokenCache'):
-			p = UserTokenCache.dbSchema
-			self.hashed = str(row[p.HASH])
-			self.jwt = str(row[p.JWT])
-			self.jwt_expires = jwt_get_data(self.jwt).exp
-			self.user_token = str(row[p.USER_TOKEN])
-			self.last_used = datetime.fromtimestamp(int(row[p.LAST_USED]), UTC)
-			self.requests_count = int(row[p.REQUESTS_CNT])
-			self.uidHint = int(row[p.UID])
-			self.email = str(row[p.EMAIL])
+		@classmethod
+		async def from_hash(cls, parent:"UserTokenCache", hash:str):
+			async with parent._transaction() as cur:
+				row = await cur.execute(f"""
+				SELECT * 
+				FROM {dbSchema.tokens.t()} LEFT JOIN {dbSchema.sso_sessions.t()} ON ({dbSchema.tokens.q(dbSchema.tokens.EMAIL)} = {dbSchema.sso_sessions.q(dbSchema.sso_sessions.EMAIL)}) 
+				WHERE {dbSchema.tokens.HASH} = ? AND {dbSchema.tokens.JWT_EXPIRES} > strftime('%s', 'now', '+5 minutes')""", (hash,))
+				row = await row.fetchone()
+				if row is None:
+					return None
+				return await cls.from_row(parent, row)
+		@classmethod
+		async def from_email(cls, parent:"UserTokenCache", email:str):
+			async with parent._transaction() as cur:
+				row = await cur.execute(f"""
+				SELECT * 
+				FROM {dbSchema.tokens.t()} LEFT JOIN {dbSchema.sso_sessions.t()} ON ({dbSchema.tokens.q(dbSchema.tokens.EMAIL)} = {dbSchema.sso_sessions.q(dbSchema.sso_sessions.EMAIL)}) 
+				WHERE {dbSchema.tokens.HASH} = ? AND {dbSchema.tokens.JWT_EXPIRES} > strftime('%s', 'now', '+5 minutes')""", (email,))
+				row = await row.fetchone()
+				if row is None:
+					return None
+				return await cls.from_row(parent, row)
 
-			self.__parent = parent
+		@classmethod
+		async def from_row(cls, parent:"UserTokenCache", row:Row):
+			t = dbSchema.tokens
+			jwt = str(row[t.JWT])
+			sid = cls.sid_entry.from_row(row)
+			self = cls(
+				hashed = str(row[t.HASH]),
+				jwt=jwt,
+				jwt_expires = jwt_get_data(jwt).exp,
+				user_token = str(row[t.USER_TOKEN]),
+				last_used = datetime.fromtimestamp(int(row[t.LAST_USED]), UTC),
+				requests_count = int(row[t.REQUESTS_CNT]),
+				uidHint = int(row[t.UID]),
+				email = str(row[t.EMAIL]),
+
+				_parent = parent,
+				sid = sid
+			)
 			self.__saved = self.to_json()
+			return self
 
 		async def refresh(self):
 			if datetime.now(UTC) > self.jwt_expires:
 				raise AuthenticationError(401, "Login expired. Please reauthenticate.")
 
-			async with self.__parent.operation() as session:
+			async with self._parent.__networkManager.operation() as session:
 				async with session.post(
 					"https://auth.gaijinent.com/login_token.php", 
 					data={"token": self.user_token}, 
@@ -134,7 +208,7 @@ class UserTokenCache:
 						"Content-Type": "application/x-www-form-urlencoded"
 					}
 				) as r:
-					content = await self.__parent._handle_response(r)
+					content = await self._parent.__networkManager.handle_response(r)
 
 			if content.get("status") == "LOGINERROR":
 				if content.get("error") == "Wrong token":
@@ -169,59 +243,114 @@ class UserTokenCache:
 			return self.jwt_expires - datetime.now(UTC)
 		def usedWithin(self, minutes:int) -> bool:
 			return self.last_used > (datetime.now(UTC) - timedelta(minutes=minutes)) 
-		
+		async def getSquadronId(self, throwOnNone:bool = True) -> int|None:
+			userEntry = (await Request.send_template(
+				self,
+				"get_users_terse_info",
+				usersList=str(self.uidHint)
+			)).get(str(self.uidHint))
+
+			if userEntry is None:
+				raise HTTPException(404, "User not found")
+				
+			if userEntry.get("clanName") is None:
+				if throwOnNone:
+					raise HTTPException(401, "User is not part of a squadron")
+				return None
+
+			squadronData = await Request.send_template(
+				self,
+				"clan_find_by_prefix",
+				namePrefix=userEntry["clanName"],
+				tagPrefix=userEntry["clanTag"]
+			)
+			if "clan" in squadronData:
+				return int(squadronData["clan"]["_id"])
+			elif isinstance(squadronData, dict):
+				squadronData = [squadronData,]
+
+			for squadron in squadronData:
+				for member in squadron["members"]:
+					if int(member["uid"]) == self.uidHint:
+						return int(squadron["_id"])
+			if throwOnNone:
+				raise HTTPException(401, "User is not part of a squadron")
+			return None
+
 		async def _write_values(self):
 			changed:dict[str, int|str] = {}
+			sso_changed:dict[str, str|int] = {}
+			
 			for key, value in self.to_json().items():
-				if self.__saved[key] == value: continue
-				if isinstance(value, datetime):
+				if key == dbSchema.sso_sessions.t():
+					if value is None:
+						continue
+					for k, v in value.items():
+						if self.__saved[dbSchema.sso_sessions.t()][k] == v:
+							continue
+						sso_changed[k] = v
+					continue
+				elif self.__saved[key] == value: 
+					continue
+				elif isinstance(value, datetime):
 					value = dtToTimestamp(value)
 				changed[key] = value
 			
 			if not changed: # No point running query, no changes made
 				return
 
-			async with self.__parent._transaction() as cur:
-				p = self.__parent.dbSchema
+			async with self._parent._transaction() as cur:
 				await cur.execute(f"""
-					UPDATE {p.TABLE} 
+					UPDATE {dbSchema.tokens.t()} 
 					SET {", ".join([f"{k} = ?" for k in changed.keys()])}
-					WHERE {p.EMAIL} = ?
+					WHERE {dbSchema.tokens.HASH} = ?
 				""",
 				(
 					*changed.values(),
-					self.__saved[p.EMAIL]
+					self.__saved[dbSchema.tokens.HASH]
 				))
+				if sso_changed:
+					await cur.execute(f"""
+						UPDATE {dbSchema.sso_sessions.t()} 
+						SET {", ".join([f"{k} = ?" for k in sso_changed.keys()])}
+						WHERE {dbSchema.sso_sessions.EMAIL} = ?
+					""",
+					(
+						*sso_changed.values(),
+						self.__saved[dbSchema.sso_sessions.EMAIL]
+					))	
 
 			self.__saved = self.to_json()
 		
-		def to_json(self) -> dict[str, str|int|datetime]:
-			p = self.__parent.dbSchema
-			return {
-				p.HASH: self.hashed,
-				p.JWT: self.jwt,
-				p.JWT_EXPIRES: self.jwt_expires,
-				p.USER_TOKEN: self.user_token,
-				p.LAST_USED: self.last_used,
-				p.UID:self.uidHint,
-				p.EMAIL:self.email,
-				p.REQUESTS_CNT:self.requests_count
+		def to_json(self) -> dict[str, str|int|datetime|dict[str, str|datetime]]:
+			t = dbSchema.tokens
+			s = dbSchema.sso_sessions
+			obj = {
+				t.HASH: self.hashed,
+				t.JWT: self.jwt,
+				t.JWT_EXPIRES: self.jwt_expires,
+				t.USER_TOKEN: self.user_token,
+				t.LAST_USED: self.last_used,
+				t.UID:self.uidHint,
+				t.EMAIL:self.email,
+				t.REQUESTS_CNT:self.requests_count,
 			}
+
+			if self.sid	is not None:
+				obj[s.t()] = self.sid.to_json()
+			else:
+				obj[s.t()] = None
+
+			return obj
 	
 	__autorefresh_job:Job = None
 	__db_path:Path = None
 	__pending_2fa:dict[str, dict[str, int|str|list[str]]] # email -> {requestId, userId, types, code (after answering)}
+	__networkManager:NetworkManager
 
-	def __init__(self):
+	def __init__(self, networkManager:NetworkManager):
+		self.__networkManager = networkManager
 		self.scheduler = AsyncIOScheduler()
-		#region Aiohttp session setup
-		self.__session: ClientSession | None = None
-		self.__closing = False
-		self.__active_ops = 0
-		self.__active_ops_done = asyncio.Event()
-		self.__active_ops_done.set()
-		self.__lock = asyncio.Lock()
-		#endregion
 
 		self.__pending_2fa = {}
 		self.__db_path = Path(__file__).parent / "users.db"
@@ -229,14 +358,8 @@ class UserTokenCache:
 		_logger.debug("User Token Cache initialized")
 
 	async def get(self, token:str):
-		schema = self.dbSchema
 		hash = self._hash_token(token)
-		async with self._transaction() as cur:
-			row = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.HASH} = ? AND {schema.JWT_EXPIRES} > strftime('%s', 'now', '+5 minutes')", (hash,))).fetchone()
-			if row:
-				await cur.execute(f"UPDATE {schema.TABLE} SET {schema.REQUESTS_CNT} = {schema.REQUESTS_CNT} + 1, {schema.LAST_USED} = strftime('%s', 'now') WHERE {schema.HASH} = ?", (hash,))
-				return self.Entry(row, self)
-			return None
+		return await self.Entry.from_hash(self, hash)
 	
 	async def login(self, email:str, password:str|None = None):
 		"""Adds the user to the database if needed and returns the token for the user"""
@@ -248,7 +371,8 @@ class UserTokenCache:
 			"client": client_id
 		}
 		
-		async with self.operation() as session:
+		async with self.__networkManager.operation() as session:
+			#region Auth flow
 			async with session.post(
 				"https://auth.gaijinent.com/login.php", 
 				data=logindata, 
@@ -257,9 +381,9 @@ class UserTokenCache:
 					"User-Agent": "ThunderAPI/1.0"
 				}
 			) as r:
-				data = await self._handle_response(r)
+				data = await self.__networkManager.handle_response(r)
 
-			if data["status"] == "2STEP": # FIXME: Implement 2FA for logging in
+			if data["status"] == "2STEP":
 				two_factor_types = set()
 				if data.get("hasGjPass"): two_factor_types.add("GaijinPass")
 				if data.get("hasTwoStepEmail"): two_factor_types.add("Email")
@@ -270,14 +394,13 @@ class UserTokenCache:
 					"types": two_factor_types 
 				}
 
-				# TODO: Implement 2FA Loop for non gaijin pass
 				tries = 0
 				success = False
 				while not success and tries < 10:
 					async with session.get(f"https://auth.gaijinent.com/api/auth/requestTwoStep?requestId={data['requestId']}&userId={data['userId']}", timeout=60) as r:
 						if "GaijinPass" in two_factor_types:
 							try:
-								data = await self._handle_response(r)
+								data = await self.__networkManager.handle_response(r)
 								success = True
 							except AuthenticationError:
 								async with session.post(
@@ -288,7 +411,7 @@ class UserTokenCache:
 										"User-Agent": "ThunderAPI/1.0"
 									}
 								) as r:
-									data = await self._handle_response(r)
+									data = await self.__networkManager.handle_response(r)
 								tries += 1
 								continue
 						else: # UNTESTED PATH
@@ -320,46 +443,158 @@ class UserTokenCache:
 						"User-Agent": "ThunderAPI/1.0"
 					}
 				) as r:
-					data = await self._handle_response(r)
+					data = await self.__networkManager.handle_response(r)
 
 				if data["status"] == "2STEPERROR":
 					self.__pending_2fa.pop(email, None)
 					raise AuthenticationError(403, "Invalid 2FA code provided.")
 
-		if data["status"] == "LOGINERROR":
-			raise HTTPException(400, f"Login failed: {data["error"]}")
+			if data["status"] == "LOGINERROR":
+				raise HTTPException(400, f"Login failed: {data["error"]}")
+			#endregion
+
 		async with self._transaction() as cur:
-			schema = self.dbSchema
+			schema = dbSchema
 			raw, hash = self._generate_hash()
 			jwt_decoded = jwt_get_data(data["jwt"])
-			if await (await cur.execute(f"SELECT 1 FROM {schema.TABLE} WHERE {schema.EMAIL} = ?", (email,))).fetchone() is not None:
+			if await (await cur.execute(f"SELECT 1 FROM {schema.tokens.t()} WHERE {schema.tokens.EMAIL} = ?", (email,))).fetchone() is not None:
 				_logger.debug(f"Overwriting old loginentry for {email}")
 				await cur.execute(f"""
-					UPDATE {schema.TABLE} 
+					UPDATE {schema.tokens.t()} 
 					SET 
-						{schema.HASH} = ?, 
-						{schema.JWT} = ?,
-						{schema.JWT_EXPIRES} = ?, 
-						{schema.USER_TOKEN} = ?, 
-						{schema.UID} = ?,
-						{schema.LAST_USED} = ?
-					WHERE {schema.EMAIL} = ?""", 
+						{schema.tokens.HASH} = ?, 
+						{schema.tokens.JWT} = ?,
+						{schema.tokens.JWT_EXPIRES} = ?, 
+						{schema.tokens.USER_TOKEN} = ?, 
+						{schema.tokens.UID} = ?,
+						{schema.tokens.LAST_USED} = ?,
+					WHERE {schema.tokens.EMAIL} = ?;
+					""", 
 					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], 0, email)
 				)
 			else:
 				await cur.execute(f"""
-					INSERT INTO {schema.TABLE} 
-					({schema.HASH}, {schema.JWT}, {schema.JWT_EXPIRES}, {schema.USER_TOKEN}, {schema.UID}, {schema.EMAIL}, {schema.LAST_USED}) 
+					INSERT INTO {schema.tokens.t()} 
+					({schema.tokens.HASH}, {schema.tokens.JWT}, {schema.tokens.JWT_EXPIRES}, {schema.tokens.USER_TOKEN}, {schema.tokens.UID}, {schema.tokens.EMAIL}, {schema.tokens.LAST_USED}) 
 					VALUES ({', '.join(["?" for i in range(7)])})""", 
 					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], email, 0)
 				)		
 		return raw
+
+	async def get_sid(self, entry:Entry, password:str|None = None) -> _sidValue | None:
+		"""Returns the identity_sid and its expiry time for the given user"""
+		async with self._transaction() as cur:
+			row = await (await cur.execute(f"SELECT * FROM {dbSchema.sso_sessions.t()} WHERE {dbSchema.sso_sessions.EMAIL} = ? AND {dbSchema.sso_sessions.SID_EXP} > strftime('%s', 'now')", (entry.email,))).fetchone()
+			if row is not None:
+				return _sidValue(
+					row[dbSchema.sso_sessions.SID],
+					datetime.fromtimestamp(row[dbSchema.sso_sessions.SID_EXP])
+				)
+		async with self.__networkManager.operation() as session:
+			async with session.get("https://warthunder.com/") as response:
+				await response.read()
+				cookies = response.history[0].cookies
+				sid = cookies.get("identity_sid")
+				if sid is None:
+					return
+				sid = sid.value
+			ssoURL = (
+				f"https://login.gaijin.net/en/sso/reLogin/?"
+				f"return_url={b64encode("https://warthunder.com/en/tournament/replay".encode()).decode()}"
+				f"&crc=f07a293e4f798bf750bd92c4a1cc95da"
+				f"&public_key=IwdDDrPgUfXo3CYkaiwR"
+				f"&domain=warthunder.com"
+				f"&base_return_url=1"
+				f"&refresh_token=1"
+			)
+			async with session.get(ssoURL) as response:
+				await response.read()
+				cookies = response.cookies
+				nsid = cookies.get("identity_sid", sid)
+				if nsid != sid:
+					sid = nsid.value
+
+			fp = getenv("MACHINE_ID", md5(urandom(16)).hexdigest())
+			async with session.post(
+				"https://login.gaijin.net/en/sso/login/procedure/",
+				data={
+					"login": entry.email,
+					"password": password,
+					"action": "",
+					"referer": "",
+					"fingerprint": fp,
+					"app_id": "",
+				},
+				headers={
+					"Content-Type": "application/x-www-form-urlencoded",
+					"Referer": ssoURL,
+					"Origin": "https://login.gaijin.net",
+					"User-Agent": "ThunderAPI/1.0"
+				},
+				allow_redirects=False
+			) as response:
+				await response.read()
+				if response.status == 200:
+					body = await response.text()
+					request_id = re_search(r'name="request_id".*?value="([^"]+)"', body)
+					password_hidden = re_search(r'name="password_hidden".*?value="([^"]+)"', body)
+					login_email = re_search(r'name="login".*?value="([^"]+)"', body)
+					if request_id:
+						async with session.ws_connect(f"wss://login.gaijin.net/ws/auth/status/?requestId={request_id.group(1)}") as ws:
+							msg = await ws.receive_json()  # blocks until user approves
+							if msg.get("Message") and msg.get("Message") != "cancel":
+								# Re-POST with the 2FA code
+								resp = await session.post(
+									"https://login.gaijin.net/en/sso/login/procedure/",
+									data={
+										"login": login_email.group(1),
+										"password_hidden": password_hidden.group(1),
+										"code": msg["Message"],
+										"request_id": msg["Request"],
+										"action": "", "referer": "", "fingerprint": fp, "app_id": "",
+									},
+									headers={},
+									allow_redirects=False,
+								)
+								c = await resp.read()
+								location = resp.headers.get("Location")
+
+				elif response.status not in (302, 303):
+					_logger.error(f"Login failed with status {response.status}")
+					return
+				else:
+					location = response.headers.get("Location", "")
+				if not location:
+					_logger.error("No redirect URL in login response")
+					return
+
+			async with session.get(
+				location,
+				cookies={"identity_sid": sid},
+				allow_redirects=False
+			) as response:
+				await response.read()
+				cookies = response.cookies
+				nsid = cookies.get("identity_sid", sid)
+				if nsid != sid:
+					sid = nsid.value
+		if not isinstance(sid, str):
+			raise RuntimeError("identity_sid is not a string")
+		if sid is not None:
+			expiry = datetime.now(UTC)+timedelta(days=14)
+			entry.sid = entry.sid_entry(sid, expiry)
+			entry._write_values()
+
+			return _sidValue(
+				sid, 
+				expiry
+			) 
 	# region Helpers
 	async def _refresh(self):
 		self.__pending_2fa = {k:v for k,v in self.__pending_2fa.items() if v["expires"] > round(datetime.now(UTC).timestamp(), 0)}
-		schema = self.dbSchema
+		schema = dbSchema
 		async with self._transaction() as cur:
-			rows = await (await cur.execute(f"SELECT * FROM {schema.TABLE} WHERE {schema.JWT_EXPIRES} > strftime('%s', 'now')")).fetchall()
+			rows = await (await cur.execute(f"SELECT * FROM {schema.tokens.t()} WHERE {schema.tokens.JWT_EXPIRES} > strftime('%s', 'now')")).fetchall()
 		for row in rows:
 			entry = self.Entry(row, self)
 			try:
@@ -367,14 +602,14 @@ class UserTokenCache:
 					await entry.refresh()
 			except AuthenticationError:
 				await cur.execute(
-					f"DELETE FROM {schema.TABLE} WHERE {schema.HASH} = ?", 
+					f"DELETE FROM {schema.tokens.t()} WHERE {schema.tokens.HASH} = ?", 
 					(entry.hashed,)
 				)
 				_logger.info(f"Removed expired entry for {entry.email}")
 		async with self._transaction() as cur:
-			operation = await cur.execute(f"DELETE FROM {schema.TABLE} WHERE {schema.JWT_EXPIRES} <= strftime('%s', 'now')")
+			operation = await cur.execute(f"DELETE FROM {schema.tokens.t()} WHERE {schema.tokens.JWT_EXPIRES} <= strftime('%s', 'now')")
 			if operation.rowcount > 0:
-				_logger.info(f"Deleted {operation.rowcount} expired entries")
+				_logger.info(f"Deleted {operation.rowcount} expired entries")	
 		
 	def _generate_hash(self) -> tuple[str, str]:
 		raw_token = token_urlsafe(32)
@@ -382,13 +617,6 @@ class UserTokenCache:
 	def _hash_token(self, raw_token:str) -> str:
 		return sha256(raw_token.encode()).hexdigest()
 
-	@asynccontextmanager
-	async def operation(self):
-		session = await self._enter_op()
-		try:
-			yield session
-		finally:
-			await self._exit_op()
 	@asynccontextmanager
 	async def _transaction(self):
 		con = await connect(self.__db_path)
@@ -407,14 +635,7 @@ class UserTokenCache:
 			await con.close()
 	
 	async def start(self):
-		async with self.__lock:
-			if self.__session is not None and not self.__session.closed:
-				return
-			self.__closing = False
-			self.__session = ClientSession(headers={"User-Agent": "ThunderAPI/1.0"})
-
 		await self._init_db(self.__db_path)
-		await self._init_db(Path(__file__).parent / "vehicleParser" / "units.db")
 		if self.__autorefresh_job is None:
 			self.__autorefresh_job = self.scheduler.add_job(
 				self._refresh,
@@ -424,53 +645,11 @@ class UserTokenCache:
 			self.scheduler.start()
 
 	async def close(self):
-		async with self.__lock:
-			self.__closing = True
-
 		if self.__autorefresh_job is not None:
 			self.__autorefresh_job.remove()
 			self.__autorefresh_job = None
 		if self.scheduler.running:
 			self.scheduler.shutdown(wait=True)
-
-		await self.__active_ops_done.wait()
-
-		async with self.__lock:
-			if self.__session is not None and not self.__session.closed:
-				await self.__session.close()
-			self.__session = None
-
-	async def _enter_op(self):
-		async with self.__lock:
-			if self.__closing:
-				raise RuntimeError("UserTokenCache is shutting down")
-
-			if self.__session is None or self.__session.closed:
-				raise RuntimeError("UserTokenCache is not started")
-
-			self.__active_ops += 1
-			self.__active_ops_done.clear()
-
-			return self.__session
-
-	async def _exit_op(self):
-		async with self.__lock:
-			self.__active_ops -= 1
-
-			if self.__active_ops <= 0:
-				self.__active_ops = 0
-				self.__active_ops_done.set()
-
-	@staticmethod
-	async def _handle_response(resp:ClientResponse) -> dict[str, Any]:
-		text = await resp.text()
-
-		if resp.status >= 400:
-			raise AuthenticationError(400, f"Request failed: {resp.status} {text}")
-		if text.startswith("!ERROR"):
-			raise AuthenticationError(400, f"Request failed: {text}")
-
-		return loads(text)
 
 	@staticmethod
 	async def _init_db(dbPath:Path):

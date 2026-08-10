@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-from utils import users_cache
-from api import users_router, clans_router, general_router, auth_router, units_router
+from utils import users_cache, networkManager
+from api import users_router, clans_router, general_router, auth_router, units_router, replays_router, marketplace_router
 from api.shared import limiter
 
 logger = logging.getLogger()
@@ -43,16 +43,27 @@ tags_metadata = [
 	{
 		"name": "users",
 		"description": "Operations to get information about the users/players.",
+	},
+	{
+		"name": "replays",
+		"description": "Operations to get information about replays.",
+	},
+	{
+		"name": "marketplace",
+		"description": "Operations to get information about the marketplace.",
 	}
 ]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 	await users_cache.start()
+	await networkManager.start()
+
 	try:
 		yield
 	finally:
 		await users_cache.close()
+		await networkManager.close()
 
 app = FastAPI(
 	title="ThunderAPI",
@@ -80,6 +91,8 @@ app.include_router(clans_router.router, prefix="/v1")
 app.include_router(general_router.router, prefix="/v1")
 app.include_router(units_router.router, prefix="/v1")
 app.include_router(users_router.router, prefix="/v1")
+app.include_router(replays_router.router, prefix="/v1")
+app.include_router(marketplace_router.router, prefix="/v1")
 #endregion
 
 #region Remove 422 responses from OpenAPI schema

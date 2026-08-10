@@ -1,16 +1,17 @@
 from os import getenv
 from typing_extensions import Annotated
 from typing import Literal, Any
-from fastapi import APIRouter, Query, Path, Request
+from fastapi import APIRouter, Query, Path, Request, Depends
 from fastapi.responses import JSONResponse
-from utils import users_cache
+from utils import users_cache, networkManager
+from utils.auth import UserTokenCache
 from utils.replayParser import Replay
 from datetime import datetime, UTC
 from bs4 import BeautifulSoup, Tag
 from enum import IntEnum
 from api.backends.general import *
 from api.models import General
-from api.shared import IpString, limiter
+from api.shared import IpString, limiter, get_auth
 
 router = APIRouter(
 	tags=["general"],
@@ -21,7 +22,8 @@ router = APIRouter(
 @limiter.shared_limit("general", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_latest_game_ver(
 	request: Request,
-	branch: Annotated[Literal["dev", "dev-stable"], Query(title="The game version to get")] = None
+	branch: Annotated[Literal["dev", "dev-stable"], Query(title="The game version to get")] = None,
+	user: UserTokenCache.Entry = Depends(get_auth)
 ) -> IpString:
 	return await getLatestGameVer(branch)
 
@@ -162,8 +164,8 @@ class NewsObj:
 
 @router.get("/news", summary="Gets the latest news from gaijin", description="Puts the pinned news first (Current update changelog + latest big news)")
 @limiter.shared_limit("general", getenv("REGULAR_RATE_LIMIT", "30/minute"))
-async def get_news(request: Request) -> list[General.News.NewsResponseModel]:
-	async with users_cache.operation() as session:
+async def get_news(request: Request, user: UserTokenCache.Entry = Depends(get_auth)) -> list[General.News.NewsResponseModel]:
+	async with networkManager.operation() as session:
 		r1 = await session.get("http://newslist.gaijin.net:8080/news/warthunder/en/js")
 		r1_news:list[NewsObj] = []
 		for news in r1.json()["items"]:
@@ -193,23 +195,3 @@ async def get_news(request: Request) -> list[General.News.NewsResponseModel]:
 	combined = pinned + unpinned
 	return JSONResponse([i.to_json() for i in combined])
 #endregion
-
-@router.get(
-	"/replay/{replayId}", 
-	summary="Gets data from a specified replay",
-	responses={
-		200: {"model": General.Replay.DataModel},
-		404: {"model": General.Replay.ReplayNotFoundModel, "description": "Replay not found"}
-	})
-@limiter.shared_limit("general", getenv("REGULAR_RATE_LIMIT", "30/minute"))
-async def get_replay(
-	request: Request,
-	replayId: Annotated[
-		str, 
-		Path(
-			title="The replay's ID to get",
-			pattern=r"^#?[0-9a-fA-F]{1,16}$",
-			description="Must be given in HEX format"
-		)
-]):
-	return await Replay.get(replayId)

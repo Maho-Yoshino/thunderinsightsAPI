@@ -1,5 +1,5 @@
 from utils.replayParser.parser import ReplayParser
-from aiohttp import ClientSession
+from utils import networkManager
 from fastapi import HTTPException
 from asyncio import sleep
 
@@ -23,7 +23,7 @@ class Replay(dict):
 
 		#region wrpl download
 		async def get_data():
-			async with ClientSession() as session:
+			async with networkManager.operation() as session:
 				wrpl_num = 0
 				wait_time = 1
 				while True:

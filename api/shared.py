@@ -1,5 +1,6 @@
 from os import getenv
-from fastapi import HTTPException, Form
+from fastapi import HTTPException, Form, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from slowapi import Limiter
 from tools import Request
 from utils import AuthenticationError, users_cache
@@ -9,25 +10,16 @@ from datetime import timedelta
 from typing import Any
 
 limiter = Limiter(key_func=lambda request: request.client.host, default_limits=[getenv("REGULAR_RATE_LIMIT", "30/minute")])
+security = HTTPBearer(description="Get the token from `POST /v1/login`")
 
-async def get_request(token: str, template:str, **headers:str|dict[str, Any]):
-	if (entry := await users_cache.get(token)) is None:
-		raise HTTPException(status_code=403, detail="The given token is invalid")
-	if entry.timeLeft() <= timedelta(minutes=30):
-		await entry.refresh()
-	try:
-		request = await Request.from_template(entry, template)
-	except AuthenticationError:
-		raise HTTPException(status_code=500, detail="Unable to log into gaijin's systems")
-	for key, value in headers.items():
-		if key.lower() == "body":
-			for k, v in value.items():
-				request[k] = v
-		else:
-			request.headers[key] = str(value)
-	entry.requests_count += 1
-	await entry._write_values()
-	return request
+async def get_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
+	token = credentials.credentials
+	user = await users_cache.get(token)
+	if not user:
+		raise HTTPException(404)
+	user.requests_count += 1
+	await user._write_values()
+	return user
 
 IntString = Annotated[
 	str,
@@ -38,8 +30,4 @@ IpString = Annotated[
 	str,
 	StringConstraints(pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"),
 	Field(description="IP address represented as a string", examples=["0.0.0.0"])
-]
-TokenString = Annotated[
-	str,
-	Form(description="Token obtained from the `login` endpoint.")
 ]

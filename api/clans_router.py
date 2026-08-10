@@ -1,9 +1,9 @@
 from os import getenv
-from logging import getLogger
 from typing_extensions import Annotated
-from fastapi import APIRouter, Path, Query, Form, HTTPException, Request
+from fastapi import APIRouter, Path, Query, Form, HTTPException, Request as faRequest, Depends
 from fastapi.responses import JSONResponse
-from api.shared import get_request, TokenString, limiter
+from api.shared import limiter, get_auth
+from tools import Request
 from api.models import Clans, Base
 from api.backends.clans import *
 
@@ -22,29 +22,29 @@ router = APIRouter(
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def send_application(
-    request: Request,
+    request: faRequest,
     clanId: squadronId,
-    token: TokenString
+    user: str = Depends(get_auth),
 ) -> bool:
-    response = await (await get_request(
-        token, 
-        "clan_membership_request", 
+    response = await Request.send_template(
+        user, 
+        "clan_membership_request",
         body = {
             "_id": clanId
         }
-    )).send()
+    )
     return response.get("clanTag") is not None
-@router.post(
+@router.get(
     "/{clanId}/applicants", 
     summary="Gets the currently applying members"
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_applicants(
-    request: Request,
-    token: TokenString,
-    clanId: squadronId
+    request: faRequest,
+    clanId: squadronId,
+    user: str = Depends(get_auth)
 ) -> list[Clans.ApplicantModel]:
-    clanData = await getClan(token, clanId)
+    clanData = await getClan(user, clanId)
     data = []
     candidates = clanData.get("candidates")
     if candidates is None:
@@ -85,19 +85,18 @@ async def get_applicants(
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def accept_applicant(
-    request: Request,
-    token: TokenString,
-    userId: gaijinUserId
-): 
-    response = await (await get_request(
-        token, 
+    request: faRequest,
+    userId: gaijinUserId,
+    user: UserTokenCache.Entry = Depends(get_auth)
+):
+    return await Request.send_template(
+        user, 
         "clan_accept_membership_request",
         userId=userId,
         body={
-            "_id": await tokenSquadronId(token)
+            "_id": await user.getSquadronId()
         }
-    )).send()
-    return response
+    )
 
 @router.post(
     "/reject/{userId}",
@@ -109,27 +108,25 @@ async def accept_applicant(
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def reject_applicant(
-    request: Request,
-    token: TokenString,
+    request: faRequest,
     userId: gaijinUserId,
-    message: Annotated[str, Query(title="Message to include alongside rejection")] = ""
+    message: Annotated[str, Query(title="Message to include alongside rejection")] = "",
+    user: UserTokenCache.Entry = Depends(get_auth)
 ): 
-    response = await (await get_request(
-        token, 
+    return await Request.send_template(
+        user, 
         "clan_accept_membership_request",
         userId=userId,
         body={
-            "_id": await tokenSquadronId(token),
+            "_id": await user.getSquadronId(),
             "comments": message
         }
-    )).send()
-
-    return response
+    )
 
 @router.post(
     "/role/{userId}", 
-    summary="Get or set a member's role", 
-    description="Setting an user's role requires `Deputy` or `Commander`",
+    summary="Set a member's role", 
+    description="Requires `Deputy` or `Commander` level in squadron",
     responses={
         200: {"model": Base.SuccessEmptyDict},
         403: {"model": Base.GaijinResponse, "description": "You do not have the required permissions"}
@@ -137,20 +134,20 @@ async def reject_applicant(
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def change_role(
-    request: Request,
-    token: TokenString,
+    request: faRequest,
     userId: gaijinUserId,
-    role: Annotated[Clans.RolesDisplay, Query(title="The role to assign")]
+    role: Annotated[Clans.RolesDisplay, Query(title="The role to assign")],
+    user: UserTokenCache.Entry = Depends(get_auth)
 ): 
     role = Clans.Roles[role.name]
-    return await (await get_request(
-        token, 
+    return await Request.send_template(
+        user, 
         "clan_change_member_role",
         userid=userId,
         body={
             "role": role.value
         }
-    )).send()
+    )
 
 @router.post(
     "/kick/{userId}",
@@ -159,19 +156,19 @@ async def change_role(
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def kick_member(
-    request: Request,
-    token: TokenString,
+    request: faRequest,
     userId: gaijinUserId,
-    reason: Annotated[str, Form(title="The reason for kicking")] = ""
+    reason: Annotated[str, Form(title="The reason for kicking")] = "",
+    user: UserTokenCache.Entry = Depends(get_auth)
 ):
-    return await (await get_request(
-        token, 
+    return await Request.send_template(
+        user, 
         "clan_dismiss_member",
         userId=userId,
         body={
             "comments": reason
         }
-    )).send()
+    )
 
 @router.post(
     "/leave",
@@ -179,30 +176,30 @@ async def kick_member(
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def leave_squadron(
-    request: Request,
-    token: TokenString
+    request: faRequest,
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> bool:
-    response = await (await get_request(
-        token, 
+    response = await Request.send_template(
+        user, 
         "clan_leave"
-    )).send()
+    )
     return response.get("clanTag") is None
 
-@router.post(
+@router.get(
     "/{clanId}/logs", 
     summary="Gets the squadron logs"
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_clan_logs(
-    request: Request,
+    request: faRequest,
     clanId: squadronId, 
-    token: TokenString,
     limit: Annotated[int, Query(title="The max ammount to get at once", gt=0, le=50)] = 10,
-    fromEntry: Annotated[str, Query(title="The last call's 'lastLog' value to begin searching from")] = None
+    fromEntry: Annotated[str, Query(title="The last call's 'lastLog' value to begin searching from")] = None,
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> Clans.LogsModel:
-    allLogs = (await tokenSquadronId(token)) == clanId
-    response = await get_request(
-        token, 
+    allLogs = await user.getSquadronId() == clanId
+    response = await Request.from_template(
+        user, 
         "clan_get_log",
         body = {
             "_id":clanId,
@@ -228,7 +225,7 @@ async def get_clan_logs(
                 "detail": action.value[1]
             }
         }
-        if item.get("uId") is not None:
+        if item.get("uId") is not None and not (action == Clans.Actions.rem and item.get("uid") is not None and item["uId"] == item["uid"]):
             logEntry["admin"] = {
                 "_id": item["uId"],
                 "nickname": item["uN"]
@@ -261,55 +258,55 @@ async def get_clan_logs(
         "logs": logs
     })
 
-@router.post("/search/", summary="Search for squadron")
+@router.get("/search/", summary="Search for squadron")
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_clan_search(
-    request: Request,
-    token: TokenString,
+    request: faRequest,
     clanName: Annotated[str, Query(title="Squadron name to look up")] = None,
     clanTag: Annotated[str, Query(title="Squadron tag to look up")] = None,
-    limit: Annotated[int, Query(title="Amount of squadrons to return", gt=0, lt=50)] = 10
+    limit: Annotated[int, Query(title="Amount of squadrons to return", gt=0, lt=50)] = 10,
+    page: Annotated[int, Query(title="The page to display. Count starts from 0", ge=0)] = 0,
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> list[Clans.ClanModel]:
-    return await searchClan(token, clanName=clanName, clanTag=clanTag, limit=limit)
+    return await searchClan(user, clanName=clanName, clanTag=clanTag, limit=limit, page=page)
 
-@router.post(
+@router.get(
     "/leaderboard",
     summary="Gets the leaderboard of squadrons. Position here is zero indexed, so the first squadron is at position 0",
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_clan_leaderboard(
-    request: Request,
-    token: TokenString,
-    limit: Annotated[int, Query(title="The max ammount to get at once", gt=0, le=50)] = 20,
-    start: Annotated[int, Query(title="The index to start lookup from")] = 0
+    request: faRequest,
+    limit: Annotated[int, Query(title="The max amount to get at once", gt=0, le=50)] = 20,
+    page: Annotated[int, Query(title="The page to look up. Starts from 0.", ge=0)] = 0,
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> list[Clans.ClanModel]:
-    response = await get_request(
-        token, 
+    response = await Request.send_template(
+        user, 
         "clan_get_leaderboard",
         count=limit,
-        start=start
+        start=limit*page
     )
 
-    response = await response.send()
     if response.get("clan") is None:
         raise HTTPException(500, "Could not obtain leaderboard data from Gaijin")
     return response["clan"]
 
-@router.post(
+@router.get(
     "/leaderboard/{clanId}",
     summary="Gets the leaderboard position of a given squadron. Position here is not zero indexed"
 )
 async def get_clan_leaderboard_position(
-    request: Request,
-    token: TokenString,
-    clanId: Annotated[int, Path(title="The squadron's ID")]
+    request: faRequest,
+    clanId: Annotated[int, Path(title="The squadron's ID")],
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> Clans.ClanPositionModel:
-    response = await get_request(
-        token, 
+    response = await Request.send_template(
+        user, 
         "clan_get_leaderboard",
         clanId=clanId
     )
-    response = await response.send()
+
     if response.get("clan") is None:
         raise HTTPException(404, "Could not obtain leaderboard position data from Gaijin")
     return {
@@ -317,14 +314,14 @@ async def get_clan_leaderboard_position(
         "rating": response["clan"]["astat"]["dr_era5_hist"]
     }
 
-@router.post(
+@router.get(
     "/{clanId}/",
     summary="Gets data about the given squadron"
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_clan(
-    request: Request,
-    token: TokenString,
-    clanId: Annotated[int, Path(title="The squadron's ID")]
+    request: faRequest,
+    clanId: Annotated[int, Path(title="The squadron's ID")],
+    user: UserTokenCache.Entry = Depends(get_auth)
 ) -> Clans.ClanModel:
-    return await getClan(token, clanId)
+    return await getClan(user, clanId)

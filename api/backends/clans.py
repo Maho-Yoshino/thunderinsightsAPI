@@ -1,17 +1,18 @@
 from api.models import Clans
 from fastapi import HTTPException
-from api.shared import get_request
 from typing import Any
-from api.users_router import get_terse
-from utils import users_cache
+from utils.auth import UserTokenCache
+from tools import Request
 
-async def searchClan(token: str, clanName: str | None = None, clanTag: str | None = None, limit: int = 10) -> list[Clans.ClanModel]:
-    response = await get_request(
-        token, 
-        "clan_find_by_prefix"
+async def searchClan(user: UserTokenCache.Entry, clanName: str | None = None, clanTag: str | None = None, limit: int = 10, page:int = 0) -> list[Clans.ClanModel]:
+    response = await Request.from_template(
+        user, 
+        "clan_find_by_prefix",
+        count=limit,
+        start=limit*page
     )
     if clanName is None and clanTag is None: 
-        raise HTTPException(500, "You must provide either a clanName or clanTag")
+        raise HTTPException(400, "You must provide either a clanName or clanTag")
     if clanName:
         response.headers["namePrefix"] = clanName
     else:
@@ -25,29 +26,15 @@ async def searchClan(token: str, clanName: str | None = None, clanTag: str | Non
         response["clan"] = [response["clan"],]
     return response["clan"]
 
-async def getClan(token: str, clanId: int) -> dict[str, Any]:
-    data = await (
-        await get_request(
-            token,
-            "clan_get",
-            clanId=clanId
-        )
-    ).send()
+async def getClan(user: UserTokenCache.Entry, clanId: int) -> dict[str, Any]:
+    data = await Request.send_template(
+        user,
+        "clan_get",
+        clanId=clanId
+    )
 
     candidates = data.get("candidates")
     if isinstance(candidates, dict):
         data["candidates"] = [candidates,]
 
     return data
-async def tokenSquadronId(token:str) -> int|None:
-    if (_ := await users_cache.get(token)) is not None:
-        userdata = (await get_terse(token, *(_.uidHint,))).get(str(_.uidHint))
-        if userdata and userdata.get("clanName") is not None:
-            squadronData = await searchClan(token, clanName=userdata["clanName"])
-            for squadron in squadronData:
-                for member in squadron["members"]:
-                    if int(member["uid"]) == _.uidHint:
-                        return int(squadron["_id"])
-        return None
-    else:
-        raise HTTPException(401, "Invalid token provided")

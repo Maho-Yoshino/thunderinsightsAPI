@@ -1,32 +1,11 @@
 from __future__ import annotations
-from asyncio import get_running_loop
 from dataclasses import dataclass
 from enum import Enum
 from logging import getLogger
 from pathlib import Path
-from datetime import datetime
-from typing import Any
-from pandas import read_csv
-from utils.vehicleParser.vehiclesProcessor import Vehicle, Weapon, Sensor, getAllVehicleIDs, processVehicles
+from utils.vehicleParser.vehiclesProcessor import Vehicle, Weapon, Sensor
 
 _logger = getLogger(__name__)
-
-class VehicleDataTypes(Enum):
-	META = 0
-	SUBTYPES = 1
-	BATTLERATINGS = 2
-	ECONOMY = 3
-	ENGINES = 4
-	MODIFICATIONS = 5
-	NIGHT_VISION = 6
-	THERMAL = 7
-	COMPUTER = 8
-	AERO = 9
-	PRESETS = 10
-	IMAGES = 11
-	SENSORS = 12
-	LOCALIZATION = 13
-
 
 class DatabasePaths:
 	ROOT:Path = Path(__file__).parent

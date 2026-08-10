@@ -1,4 +1,4 @@
-from asyncio import get_running_loop, Lock
+from asyncio import get_running_loop
 from logging import getLogger
 from typing import Literal, Any
 from pathlib import Path
@@ -9,9 +9,9 @@ from packaging.version import Version
 from .constants import *
 from subprocess import run as sub_run
 from datetime import datetime, UTC
-from aiohttp import ClientSession
 from time import perf_counter
 from pandas import read_csv, DataFrame
+from utils import networkManager
 
 _logger = getLogger(__name__)
 
@@ -112,7 +112,7 @@ async def update_gamefiles():
 	if (CACHED_VALIDITY_UNTIL >= int(datetime.now(UTC).timestamp())):
 		return
 	CACHED_VALIDITY_UNTIL = int(datetime.now(UTC).timestamp()) + 10*60 # 10 minutes of cached version data
-	async with ClientSession() as session, session.get(REMOTE_VERSION_URL) as response:
+	async with networkManager.get(REMOTE_VERSION_URL) as response:
 		remote_ver = Version(await response.text("utf-8"))
 	loop = get_running_loop()
 

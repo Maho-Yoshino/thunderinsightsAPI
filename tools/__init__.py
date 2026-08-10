@@ -5,15 +5,15 @@ from logging import getLogger
 from aiohttp import ClientResponse
 from requests import get as req_get
 from json import loads
-from requests.exceptions import JSONDecodeError
+from requests.exceptions import JSONDecodeError, SSLError
+from datetime import timedelta
 from subprocess import run as _run
 from random import choice
-from fastapi import HTTPException
 from templates import TEMPLATES, load as load_template
 from .json_to_blk import json_to_blkx, blkx_to_blk, compress_lz4hc, compress_bzip2, find_binblk
 from .hex_to_json import lz4_decompress_try, bzip_decompress_try
 from .const import Action, UserAction, ServerPool, GaijinErrorCodes
-from utils import users_cache
+from utils import networkManager
 if TYPE_CHECKING:
 	from utils import UserTokenCache
 
@@ -32,7 +32,10 @@ def blk_to_json(data: bytes) -> dict[str, Any]:
 	return _json.loads(result.stdout)
 
 #region Fetch server list once at import
-_resp = req_get("https://public-configs-warthunder-gcore.cdn.gaijin.net/production/network.blk")
+try:
+	_resp = req_get("https://public-configs-warthunder-gcore.cdn.gaijin.net/production/network.blk")
+except SSLError:
+	_resp = req_get("https://public-configs.warthunder.com/production/network.blk")
 if not _resp.ok:
 	raise RuntimeError(f"Failed to fetch server list: {_resp.status_code}")
 _cfg = blk_to_json(_resp.content)["production"]
@@ -50,12 +53,20 @@ SERVER_URLS: dict[ServerPool, list[str]] = {
 	ServerPool.USERSTAT: userstat_proxies,
 	ServerPool.CONTACTS: contacts_proxies,
 	ServerPool.UGC: ugc_servers,
+	ServerPool.MARKET_JSON: ["https://market.warthunder.com/json"],
+	ServerPool.MARKET_WEB: ["https://market.warthunder.com/web"],
+	ServerPool.MARKET_CHAR: ["https://market.warthunder.com/char"],
+	ServerPool.MARKET: ["https://market.warthunder.com/market"],
+	ServerPool.MARKET_ASSET: ["https://market.warthunder.com/assetAPI"]
 }
 def get_server(action: str) -> str:
 	try:
 		action = Action[action].value
 	except KeyError:
-		action = UserAction[action].value
+		try:
+			action = UserAction[action].value
+		except KeyError:
+			raise ValueError(f"Unknown action '{action}'. Available: {list(Action) + list(UserAction)}")
 	return choice(SERVER_URLS[action[1]])
 #endregion
 
@@ -68,7 +79,9 @@ class Request(dict):
 		body: dict[str, Any] | None = None,
 		headers: dict[str, Any] | None = None,
 		send_format: Literal["json", "blk"]|None = None,
-		login: UserTokenCache.Entry = None
+		login: UserTokenCache.Entry = None,
+		host:str|None = None,
+		method:str = "POST"
 	):
 		super().__init__(body if body is not None else {})
 		self.headers = {
@@ -84,24 +97,44 @@ class Request(dict):
 			self.headers.update(headers)
 		self.format = send_format
 		self.action = self.headers.get("action", None)
-		self.url = get_server(self.action)
+		if host is not None:
+			self.url = host
+		else:
+			self.url = get_server(self.action)
+		self.method = method
 		self.login = login
 		self.response = None  # Placeholder for storing the response of a request if needed
 
 	@classmethod
-	async def from_template(cls, login:UserTokenCache.Entry, name: str) -> "Request":
-		if name not in TEMPLATES:
-			raise ValueError(f"Unknown template '{name}'. Available: {TEMPLATES}")
-		tpl = load_template(name)
+	async def from_template(cls, user:UserTokenCache.Entry, template: str, **data:str|dict[str, Any]) -> "Request":
+		if user.timeLeft() <= timedelta(minutes=30):
+			await user.refresh()
+		if template not in TEMPLATES:
+			raise ValueError(f"Unknown template '{template}'. Available: {TEMPLATES}")
+		tpl = load_template(template)
 		headers = tpl.get("headers", {})
 		if tpl.get("auth", False):
-			headers = await login.add_auth_headers(headers)
-		return cls(
+			headers = await user.add_auth_headers(headers)
+		self = cls(
 			body=tpl.get("body"), 
 			headers=tpl.get("headers"), 
 			send_format=tpl.get("format", "json"),
-			login=login
+			login=user,
+			host=tpl.get("host", None),
+			method=tpl.get("method", "POST")
 		)
+		for key, value in data.items():
+			if key.lower() == "body":
+				for k, v in value.items():
+					self[k] = v
+			else:
+				self.headers[key] = str(value)
+		return self
+
+	@staticmethod
+	async def send_template(user:UserTokenCache.Entry, template: str, **data:str|dict[str, Any]) -> dict:
+		cls = await Request.from_template(user, template, **data)
+		return await cls.send()
 
 	def _encode(self, compress: Literal["lz4hc", "bzip2"] | None = None) -> bytes:
 		blkx = json_to_blkx(self)
@@ -113,13 +146,15 @@ class Request(dict):
 		return blk
 
 	async def send(self) -> dict[str, Any]:
-		if self.action is None and url is None: return
+		if self.action is None and self.url is None: return
 		kwargs: dict[str, Any] = {"headers": self.headers}
 		for header, value in kwargs["headers"].items():
 			if isinstance(value, (bytes, str)):
 				continue
-			kwargs["headers"][header] = str(value)
-		url = get_server(self.action)
+			elif isinstance(value, dict):
+				kwargs["headers"][header] = "; ".join(f"{k}={v}" for k, v in value.items())
+			else:
+				kwargs["headers"][header] = str(value)
 		if self.format == "json":
 			kwargs["json"] = self
 		elif self.format != None:
@@ -131,9 +166,12 @@ class Request(dict):
 		kwargs["headers"]["token"] = self.login.jwt
 		kwargs["headers"]["uidHint"] = str(self.login.uidHint)
 
-		async with users_cache.operation() as session:
-			resp = await session.post(url, **kwargs)
-			await self._decode(resp)
+		if self.method.upper() == "GET":
+			async with networkManager.get(self.url, **kwargs) as resp:
+				await self._decode(resp)
+		else:
+			async with networkManager.post(self.url, **kwargs) as resp:
+				await self._decode(resp)
 			
 		return self.result
 

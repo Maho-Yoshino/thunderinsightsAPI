@@ -1,4 +1,4 @@
-from enum import IntEnum, Enum, auto
+from enum import IntEnum, Enum, StrEnum, auto
 from re import search as re_search
 from fastapi import HTTPException
 from typing import Any
@@ -9,6 +9,14 @@ class ServerPool(IntEnum):
 	USERSTAT = 2
 	CONTACTS = 3
 	UGC = 4
+	#region marketplace
+	MARKET_JSON = 5
+	MARKET_WEB = 6
+	MARKET_CHAR = 7
+	MARKET = 8
+	MARKET_ASSET = 9
+	#endregion
+
 class Action(Enum): # Filtered actions, only leaving those that do not affect the account directly
 	#region Char
 	cln_get_users_terse_info = auto(), ServerPool.CHAR
@@ -73,6 +81,25 @@ class UserAction(Enum):
 	GetInventory = auto(), ServerPool.INVENTORY
 	GetItemPrices = auto(), ServerPool.INVENTORY
 	ExchangeItems = auto(), ServerPool.INVENTORY
+	#endregion
+	#region Marketplace Proxy
+	cln_filter_blocked_pairs = auto(), ServerPool.MARKET_JSON
+	cln_get_app_tags = auto(), ServerPool.MARKET_WEB
+	cln_market_info = auto(), ServerPool.MARKET_WEB
+	cln_get_pair_stat = auto(), ServerPool.MARKET_WEB
+	cln_books_brief = auto(), ServerPool.MARKET_WEB
+	cln_get_user_history = auto(), ServerPool.MARKET_WEB
+	cln_get_user_open_orders = auto(), ServerPool.MARKET_WEB
+	cln_market_sell = auto(), ServerPool.MARKET_WEB
+	cln_market_search = auto(), ServerPool.MARKET_WEB
+	cln_market_get_asset_class = auto(), ServerPool.MARKET_WEB
+	cln_get_general_blk = auto(), ServerPool.MARKET_CHAR
+	cln_set_general_blk = auto(), ServerPool.MARKET_CHAR
+	cmn_check_user_auth = auto(), ServerPool.MARKET
+	cancel_order = auto(), ServerPool.MARKET
+	GetContexts = auto(), ServerPool.MARKET_ASSET
+	GetContextContents = auto(), ServerPool.MARKET_ASSET
+	GetAssetClassInfo = auto(), ServerPool.MARKET_ASSET
 	#endregion
 
 class GaijinErrorCodes(Enum): # TODO: Finish documenting gaijin error codes
