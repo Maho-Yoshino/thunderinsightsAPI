@@ -1,5 +1,5 @@
 {
-    "auth": true,
+    "auth": "header",
     "format": null,
     "headers": {
         "action":"cln_get_users_terse_info",

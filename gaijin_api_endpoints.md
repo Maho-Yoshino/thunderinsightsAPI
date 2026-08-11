@@ -610,11 +610,23 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 	- `reqstamp` (request timestamp)  
 	- `appid` (`1067` for WT)  
 	- `contextid` (`1`)  
-	- `assetid`  
+	- `assetid` (ID from inventory)  
 	- `amount` (int in a string)  
 	- `currencyid` (`gjn`)  
-	- `price` (*10000)  
-	- `seller_should_get` (*10000)  
+	- `price` (x/10000 for GJN)  
+	- `seller_should_get` (x/10000 for GJN)  
+	- `agree_stamp` (timestamp)  
+	- `privateMode` (appear as anonymous, boolean)  
+#### cln_market_buy  
+- `POST` request  
+- Form data  
+	- `transactid`  
+	- `reqstamp` (request timestamp)  
+	- `appid` (`1067` for WT)  
+	- `market_name` (hash name of the vehicle/item)  
+	- `amount`  
+	- `currencyid` (`gjn`)  
+	- `price` (x/10000 for GJN)  
 	- `agree_stamp` (timestamp)  
 	- `privateMode` (appear as anonymous, boolean)  
 #### cln_market_search  
@@ -702,11 +714,21 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 - All endpoints in this category point to `https://market-proxy.gaijin.net/assetAPI`  
 #### GetContexts  
 - `POST` request  
-- No clue what purpose this endpoint serves, apparently has something to do with the inventory  
+- Gives some kind of "context" that can be used in `GetContextContents`  
+- Form data  
+	- `appid` (`1067`)  
+- Response format  
+	- Useless overhead (`result>contexts`)  
+	- Result is mostly a list of dicts  
+		- `asset_count`  
+		- `id` (value to be used as `contextid`)  
+		- `name`  
+		- `nested`  
+		- `user_facing`  
 #### GetContextContents  
 - `POST` request  
 - Form data  
-	- `contextid` (just set it to 1)  
+	- `contextid`  
 - Gets the contents of your inventory  
 #### GetAssetClassInfo  
 - `POST` request  
@@ -715,13 +737,26 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 	- `class_value0` (vehicle ID)  
 	- `class_count` (no clue what this is supposed to be)  
 - Gets data about the marketplace item  
-### View vehicle  
+### market_view_item  
 - `POST` request  
 - Host `https://login.gaijin.net/proxy/api/matching/notifyClient`  
-- Does not need `View vehicle` provided anywhere  
 - Headers  
 	- `Authorization` (Bearer {insert token})  
-- Could not test as the endpoint refused to work  
+- Form data  
+	- `action` (`market_view_item`)  
+	- `params`  
+		- `appId` (`1067` for WT)  
+		- `assetClass` (array of dicts)  
+			- `name` (value of `class_name0`)  
+			- `value` (value of `class_value0`)  
+### GetBalance  
+- `GET` request  
+- `Authorization: Bearer {token}` header for auth  
+- Host `https://wallet.gaijin.net/GetBalance`  
+- Response format  
+	- `status` (`OK`)  
+	- `user_id`  
+	- `balance` (GJN *10000)  
 ## Replay endpoints  
 ### https://wt-replays-cdnnow.cdn.gaijin.net/{match ID HEX}/xxxx.wrpl  
 - `GET` request  

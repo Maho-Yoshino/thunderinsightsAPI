@@ -1,0 +1,7 @@
+{
+    "auth": "body",
+    "format": "form",
+    "body": {
+        "action": "cln_market_info"
+    }
+}

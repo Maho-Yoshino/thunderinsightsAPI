@@ -17,7 +17,8 @@ router = APIRouter(
 	"/search",
 	summary="Searches for replays based on given parameters",
 	responses={
-		200: {"model": Replays.SearchModel}
+		200: {"model": Replays.SearchModel},
+		401: {"description": "The token has no associated `identity_sid` value associated, required for replay lookup. Get one from `/v1/get-sid`"},
 	}
 )
 @limiter.shared_limit("replays", getenv("REGULAR_RATE_LIMIT", "30/minute"))

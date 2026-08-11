@@ -1,0 +1,8 @@
+{
+    "auth": "body",
+    "format": "form",
+    "body": {
+        "action": "GetContexts",
+        "appid": "1067"
+    }
+}

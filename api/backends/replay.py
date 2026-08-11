@@ -33,7 +33,7 @@ async def search_replay(
     page: int = 0
 ):
     if user.sid is not None and user.sid.exp < datetime.now(UTC):
-        raise HTTPException(403, "Identity SID expired. Please re-login to get a new one.")
+        raise HTTPException(401, "Identity SID expired. Please re-login to get a new one.")
     response = await Request.from_template(user, "replays_search")
     response["limit"] = limit
     response["page"] = page

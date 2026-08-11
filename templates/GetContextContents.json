@@ -1,0 +1,9 @@
+{
+    "auth": "body",
+    "format": "form",
+    "body": {
+        "action": "GetContextContents",
+        "contextid": "<replace>",
+        "appid": "1067"
+    }
+}

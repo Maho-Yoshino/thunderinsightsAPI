@@ -1,0 +1,6 @@
+{
+    "method": "OPTIONS",
+    "headers": {
+        "action": "market_view_item"
+    }
+}

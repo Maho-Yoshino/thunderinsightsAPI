@@ -1,0 +1,9 @@
+{
+    "auth": "body",
+    "format": "form",
+    "body": {
+        "action": "cln_market_get_asset_class",
+        "name": "<replace>",
+        "appId": "1067"
+    }
+}

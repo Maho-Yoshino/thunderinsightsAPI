@@ -1,13 +1,11 @@
 from os import getenv
-from fastapi import HTTPException, Form, Depends
+from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from slowapi import Limiter
-from tools import Request
-from utils import AuthenticationError, users_cache
+from utils import users_cache
 from typing_extensions import Annotated
 from pydantic import StringConstraints, Field
-from datetime import timedelta
-from typing import Any
+from datetime import datetime, UTC
 
 limiter = Limiter(key_func=lambda request: request.client.host, default_limits=[getenv("REGULAR_RATE_LIMIT", "30/minute")])
 security = HTTPBearer(description="Get the token from `POST /v1/login`")
@@ -16,8 +14,9 @@ async def get_auth(credentials: HTTPAuthorizationCredentials = Depends(security)
 	token = credentials.credentials
 	user = await users_cache.get(token)
 	if not user:
-		raise HTTPException(404)
+		raise HTTPException(404, "User not found")
 	user.requests_count += 1
+	user.last_used = datetime.now(UTC)
 	await user._write_values()
 	return user
 

@@ -1,0 +1,16 @@
+{
+    "auth": "bearer",
+    "format": "form",
+    "body": {
+        "action": "market_view_item",
+        "params": {
+            "appId": "1067",
+            "assetClass": [
+                {
+                    "name": "<replace>",
+                    "value": "<replace>"
+                }
+            ]
+        }
+    }
+}

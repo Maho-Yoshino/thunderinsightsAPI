@@ -7,8 +7,8 @@ from enum import Enum
 class Base:
 	class SuccessEmptyDict(BaseModel):
 		status:Literal["success"] = "success"
-	class GaijinResponse(BaseModel):
-		detail:str
+	class GenericEmptyResponse(BaseModel):
+		success: bool
 class Authentication:
 	class Login: # /v1/login endpoint
 		class LoginResponse(BaseModel):
@@ -27,7 +27,7 @@ class Authentication:
 			status: Literal["FAIL"] = "FAIL"
 			detail: str
 
-class Clans:
+class Clans(Base):
 	class Actions(Enum):
 		rem = (0, "Kick user/Leave")
 		add = (1, "Accept membership request")
@@ -180,7 +180,7 @@ class Clans:
 		pos: int
 		rating: int
 
-class General:
+class General(Base):
 	class News: # /v1/news endpoint
 		class NewsResponseModel(BaseModel):
 			class ImageModel(BaseModel):
@@ -199,7 +199,7 @@ class General:
 			created:datetime
 			importance:int
 
-class Users:
+class Users(Base):
 	COUNTRIES = Literal[
 		"country_usa",
 		"country_germany",
@@ -400,10 +400,10 @@ class Users:
 		title: str
 		showcase: Showcase_FavMode_Model | Showcase_BH_Model | Showcase_FavUnit_Model | Showcase_NukeDrop_Model | Showcase_NukeKill_Model | Showcase_unitCollector_Model | Showcase_AceOfSpades_Model | Showcase_Medalist_Model | Showcase_Achievement_Model
 
-class Units:
+class Units(Base):
 	...
 
-class Replays:
+class Replays(Base):
 	class SearchModel(BaseModel):
 		class ReplayEntry(BaseModel):
 			class PlayerEntry(BaseModel):
@@ -519,5 +519,10 @@ class Replays:
 		detail: str = "Replay could not be found"
 		status: Literal["NOT_FOUND"] = "NOT_FOUND"
 
-class Marketplace:
+class Marketplace(Base):
+	class SellModel(BaseModel):
+		item: IntString
+		success: bool
+		price: float
+		seller_gets: float
 	...

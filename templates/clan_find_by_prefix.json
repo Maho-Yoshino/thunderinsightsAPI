@@ -1,5 +1,5 @@
 {
-    "auth": true,
+    "auth": "header",
     "format": null,
     "headers": {
         "action":"cln_clan_find_by_prefix",

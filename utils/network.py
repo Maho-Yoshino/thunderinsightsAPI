@@ -26,6 +26,11 @@ class NetworkManager:
 		async with self.operation() as session:
 			resp = await session.get(url, **kwargs)
 			yield resp
+	@asynccontextmanager
+	async def request(self, method:str, url:str, **kwargs):
+		async with self.operation() as session:
+			resp = await session.request(method, url, **kwargs)
+			yield resp
 
 	@asynccontextmanager
 	async def operation(self):

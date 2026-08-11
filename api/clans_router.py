@@ -102,8 +102,8 @@ async def accept_applicant(
     "/reject/{userId}",
     responses={
         200: {"model": Base.SuccessEmptyDict, "description":"Successfully rejected user"},
-        404: {"model": Base.GaijinResponse, "description":"Applicant could not be found"},
-        403: {"model": Base.GaijinResponse, "description":"You do not have permission to reject applicants"}
+        404: {"description":"Applicant could not be found"},
+        403: {"description":"You do not have permission to reject applicants"}
     }
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))
@@ -129,7 +129,7 @@ async def reject_applicant(
     description="Requires `Deputy` or `Commander` level in squadron",
     responses={
         200: {"model": Base.SuccessEmptyDict},
-        403: {"model": Base.GaijinResponse, "description": "You do not have the required permissions"}
+        403: {"description": "You do not have the required permissions"}
     }
 )
 @limiter.shared_limit("clans", getenv("REGULAR_RATE_LIMIT", "30/minute"))

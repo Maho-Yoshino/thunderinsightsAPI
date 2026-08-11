@@ -1,8 +1,9 @@
 import json as _json
 from os import getenv
 from typing import Literal, Any, TYPE_CHECKING
+from fastapi import HTTPException
 from logging import getLogger
-from aiohttp import ClientResponse
+from aiohttp import ClientResponse, ClientSession
 from requests import get as req_get
 from json import loads
 from requests.exceptions import JSONDecodeError, SSLError
@@ -11,8 +12,9 @@ from subprocess import run as _run
 from random import choice
 from templates import TEMPLATES, load as load_template
 from .json_to_blk import json_to_blkx, blkx_to_blk, compress_lz4hc, compress_bzip2, find_binblk
+from json import dumps
 from .hex_to_json import lz4_decompress_try, bzip_decompress_try
-from .const import Action, UserAction, ServerPool, GaijinErrorCodes
+from .const import Action, UserAction, ServerPool, GaijinErrorCodes, getAction
 from utils import networkManager
 if TYPE_CHECKING:
 	from utils import UserTokenCache
@@ -53,35 +55,33 @@ SERVER_URLS: dict[ServerPool, list[str]] = {
 	ServerPool.USERSTAT: userstat_proxies,
 	ServerPool.CONTACTS: contacts_proxies,
 	ServerPool.UGC: ugc_servers,
-	ServerPool.MARKET_JSON: ["https://market.warthunder.com/json"],
-	ServerPool.MARKET_WEB: ["https://market.warthunder.com/web"],
-	ServerPool.MARKET_CHAR: ["https://market.warthunder.com/char"],
-	ServerPool.MARKET: ["https://market.warthunder.com/market"],
-	ServerPool.MARKET_ASSET: ["https://market.warthunder.com/assetAPI"]
+	ServerPool.MARKET_JSON: ["https://market-proxy.gaijin.net/json"],
+	ServerPool.MARKET_WEB: ["https://market-proxy.gaijin.net/web"],
+	ServerPool.MARKET_CHAR: ["https://market-proxy.gaijin.net/char"],
+	ServerPool.MARKET: ["https://market-proxy.gaijin.net/market"],
+	ServerPool.MARKET_ASSET: ["https://market-proxy.gaijin.net/assetAPI"],
+	ServerPool.VIEW_VEHICLE_PROXY: ["https://login.gaijin.net/proxy/api/matching/notifyClient"],
+	ServerPool.WALLET: ["https://wallet.gaijin.net/GetBalance"]
 }
-def get_server(action: str) -> str:
-	try:
-		action = Action[action].value
-	except KeyError:
-		try:
-			action = UserAction[action].value
-		except KeyError:
-			raise ValueError(f"Unknown action '{action}'. Available: {list(Action) + list(UserAction)}")
-	return choice(SERVER_URLS[action[1]])
+def get_server(action: Action|UserAction) -> str:
+	return choice(SERVER_URLS[action.value[1]])
 #endregion
 
 class Request(dict):
 	"""Dict-backed request with headers, wire-format encoding, and .request() shortcut."""
 	response:dict[str, Any]|None
 	login: UserTokenCache.Entry = None
+	session = None
 	def __init__(
 		self,
+		action: Action|UserAction, 
 		body: dict[str, Any] | None = None,
 		headers: dict[str, Any] | None = None,
-		send_format: Literal["json", "blk"]|None = None,
+		send_format: Literal["json", "blk", "form"]|None = None,
 		login: UserTokenCache.Entry = None,
 		host:str|None = None,
-		method:str = "POST"
+		method:str = "POST",
+		session:ClientSession|None=None
 	):
 		super().__init__(body if body is not None else {})
 		self.headers = {
@@ -96,7 +96,11 @@ class Request(dict):
 		if headers:
 			self.headers.update(headers)
 		self.format = send_format
-		self.action = self.headers.get("action", None)
+
+		if action is None:
+			raise RuntimeError("No action provided")
+		self.action = action
+
 		if host is not None:
 			self.url = host
 		else:
@@ -104,24 +108,43 @@ class Request(dict):
 		self.method = method
 		self.login = login
 		self.response = None  # Placeholder for storing the response of a request if needed
+		self.session = session
 
 	@classmethod
-	async def from_template(cls, user:UserTokenCache.Entry, template: str, **data:str|dict[str, Any]) -> "Request":
+	async def from_template(cls, user:UserTokenCache.Entry, template: str, session:ClientSession|None=None, **data:str|dict[str, Any]) -> "Request":
 		if user.timeLeft() <= timedelta(minutes=30):
 			await user.refresh()
 		if template not in TEMPLATES:
 			raise ValueError(f"Unknown template '{template}'. Available: {TEMPLATES}")
 		tpl = load_template(template)
 		headers = tpl.get("headers", {})
-		if tpl.get("auth", False):
-			headers = await user.add_auth_headers(headers)
+		body = tpl.get("body", {})
+
+		if auth := tpl.get("auth", None):
+			if auth == "header":
+				headers = await user.add_auth_headers(headers)
+			elif auth == "body":
+				body = await user.add_auth_headers(body)
+			elif auth == "bearer":
+				headers = await user.add_auth_headers(headers, True)
+		if "action" in tpl:
+			action = getAction(tpl["action"])
+		elif "action" in headers:
+			action = getAction(headers["action"])
+		elif "action" in body:
+			action = getAction(body["action"])
+		else:
+			raise RuntimeError(f"No action provided for template {template}")
+
 		self = cls(
-			body=tpl.get("body"), 
-			headers=tpl.get("headers"), 
+			body=body, 
+			headers=headers, 
 			send_format=tpl.get("format", "json"),
 			login=user,
 			host=tpl.get("host", None),
-			method=tpl.get("method", "POST")
+			method=tpl.get("method", "POST"),
+			action=action,
+			session=session
 		)
 		for key, value in data.items():
 			if key.lower() == "body":
@@ -132,8 +155,8 @@ class Request(dict):
 		return self
 
 	@staticmethod
-	async def send_template(user:UserTokenCache.Entry, template: str, **data:str|dict[str, Any]) -> dict:
-		cls = await Request.from_template(user, template, **data)
+	async def send_template(user:UserTokenCache.Entry, template: str, session:ClientSession|None=None, **data:str|dict[str, Any]) -> dict:
+		cls = await Request.from_template(user, template, session=session, **data)
 		return await cls.send()
 
 	def _encode(self, compress: Literal["lz4hc", "bzip2"] | None = None) -> bytes:
@@ -148,7 +171,12 @@ class Request(dict):
 	async def send(self) -> dict[str, Any]:
 		if self.action is None and self.url is None: return
 		kwargs: dict[str, Any] = {"headers": self.headers}
+		for k, v in self.items():
+			if v == "<replace>":
+				raise HTTPException(500, f"[{self.action.name}] Body value `{k}` is not replaced by code")
 		for header, value in kwargs["headers"].items():
+			if value == "<replace>":
+				raise HTTPException(500, f"[{self.action.name}] Header value `{k}` is not replaced by code")
 			if isinstance(value, (bytes, str)):
 				continue
 			elif isinstance(value, dict):
@@ -157,27 +185,34 @@ class Request(dict):
 				kwargs["headers"][header] = str(value)
 		if self.format == "json":
 			kwargs["json"] = self
+		elif self.format == "form":
+			kwargs["headers"]["Content-Type"] = "application/x-www-form-urlencoded"
+			if self.url == SERVER_URLS[ServerPool.VIEW_VEHICLE_PROXY][0]:
+				kwargs["data"] = dumps(dict(self))
+			else:
+				kwargs["data"] = dict(self) # TODO: New code
 		elif self.format != None:
 			compr = self.headers.get("compr", None)
 			kwargs["data"] = self._encode(compress=compr)
 			kwargs["headers"] = {**self.headers, "Content-Type": "application/octet-stream"}
 			if compr:
 				kwargs["headers"]["compr"] = compr
-		kwargs["headers"]["token"] = self.login.jwt
-		kwargs["headers"]["uidHint"] = str(self.login.uidHint)
 
-		if self.method.upper() == "GET":
-			async with networkManager.get(self.url, **kwargs) as resp:
+		if self.session is None:
+			async with networkManager.request(self.method.upper(), self.url, **kwargs) as resp:
 				await self._decode(resp)
 		else:
-			async with networkManager.post(self.url, **kwargs) as resp:
+			async with self.session.request(self.method.upper(), self.url, **kwargs) as resp:
 				await self._decode(resp)
-			
+	
 		return self.result
 
 	async def _decode(self, response: ClientResponse) -> None:
 		"""Decode from compressed or raw .blk binary to json."""
 		content = await response.read()
+		if content == b"":
+			self.result = {}
+			return
 		if content.startswith(b"!ERROR:"):
 			GaijinErrorCodes.parse(content) # Throws an HTTPException
 		if content.startswith(b"!OK"):

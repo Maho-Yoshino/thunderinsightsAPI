@@ -1,0 +1,6 @@
+{
+    "auth": "bearer",
+    "format": null,
+    "method": "GET",
+    "action": "GetBalance"
+}

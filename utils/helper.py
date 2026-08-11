@@ -19,4 +19,6 @@ def StringTimeToTimedelta(text:str) -> timedelta:
 	return total
 
 def dtToTimestamp(dt:datetime) -> int:
-	return round(dt.timestamp(), 0)
+	return int(dt.timestamp())
+def dtToTimestampMs(dt:datetime) -> int:
+	return int(dt.timestamp()*1000)

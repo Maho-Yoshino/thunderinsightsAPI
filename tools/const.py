@@ -16,7 +16,17 @@ class ServerPool(IntEnum):
 	MARKET = 8
 	MARKET_ASSET = 9
 	#endregion
-
+	VIEW_VEHICLE_PROXY = 10
+	WALLET = 11
+	
+def getAction(action:str):
+	try:
+		return Action[action]
+	except KeyError:
+		try:
+			return UserAction[action]
+		except KeyError:
+			raise ValueError(f"Unknown action '{action}'. Available: {list(Action) + list(UserAction)}")
 class Action(Enum): # Filtered actions, only leaving those that do not affect the account directly
 	#region Char
 	cln_get_users_terse_info = auto(), ServerPool.CHAR
@@ -91,6 +101,7 @@ class UserAction(Enum):
 	cln_get_user_history = auto(), ServerPool.MARKET_WEB
 	cln_get_user_open_orders = auto(), ServerPool.MARKET_WEB
 	cln_market_sell = auto(), ServerPool.MARKET_WEB
+	cln_market_buy = auto(), ServerPool.MARKET_WEB
 	cln_market_search = auto(), ServerPool.MARKET_WEB
 	cln_market_get_asset_class = auto(), ServerPool.MARKET_WEB
 	cln_get_general_blk = auto(), ServerPool.MARKET_CHAR
@@ -100,7 +111,9 @@ class UserAction(Enum):
 	GetContexts = auto(), ServerPool.MARKET_ASSET
 	GetContextContents = auto(), ServerPool.MARKET_ASSET
 	GetAssetClassInfo = auto(), ServerPool.MARKET_ASSET
+	market_view_item = auto(), ServerPool.VIEW_VEHICLE_PROXY
 	#endregion
+	GetBalance = auto(), ServerPool.WALLET
 
 class GaijinErrorCodes(Enum): # TODO: Finish documenting gaijin error codes
 	# Will require a lot of testing to finish

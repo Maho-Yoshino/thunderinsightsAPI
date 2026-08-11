@@ -1,0 +1,8 @@
+{
+    "auth": "body",
+    "format": "form",
+    "body": {
+        "action": "cln_books_brief",
+        "appid": "1067"
+    }
+}

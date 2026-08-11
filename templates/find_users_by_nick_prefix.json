@@ -1,5 +1,5 @@
 {
-    "auth": true,
+    "auth": "header",
     "format": "json",
     "headers": {
         "action":"cln_find_users_by_nick_prefix_json"

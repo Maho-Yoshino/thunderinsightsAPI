@@ -221,20 +221,20 @@ class UserTokenCache:
 				self.jwt_expires = jwt_get_data(self.jwt).exp
 			await self._write_values()
 		
-		async def add_auth_headers(self, headerData: dict[str, Any]) -> dict[str, Any]:
-			if self.timeLeft() <= timedelta(minutes=30):
+		async def add_auth_headers(self, headerData: dict[str, Any], auth_bearer:bool = False) -> dict[str, Any]:
+			authTimeLeft = self.timeLeft()
+			if authTimeLeft <= timedelta(minutes=30):
 				await self.refresh()
+			elif authTimeLeft < timedelta(0):
+				raise AuthenticationError(401, "Your login has expired, please log in again to reauthenticate.")
 			if self.jwt:
-				
-				headerData["token"] = self.jwt
-				headerData["uidHint"] = str(self.uidHint)
-				headerData["transactid"] = str(randint(0, 999999999999))
+				if auth_bearer:
+					headerData["Authorization"] = f"Bearer {self.jwt}"
+				else:
+					headerData["token"] = self.jwt
+					headerData["uidHint"] = str(self.uidHint)
+					headerData["transactid"] = str(randint(0, 999999999999))
 
-				self.last_used = datetime.now(UTC) 
-				self.requests_count += 1
-				
-				await self._write_values()
-				
 				return headerData
 			else:
 				raise AuthenticationError(403, "Authentication required for this request, but no token is available. Please ensure you have logged in successfully.")
@@ -467,7 +467,7 @@ class UserTokenCache:
 						{schema.tokens.JWT_EXPIRES} = ?, 
 						{schema.tokens.USER_TOKEN} = ?, 
 						{schema.tokens.UID} = ?,
-						{schema.tokens.LAST_USED} = ?,
+						{schema.tokens.LAST_USED} = ?
 					WHERE {schema.tokens.EMAIL} = ?;
 					""", 
 					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], 0, email)

@@ -36,10 +36,10 @@ tags_metadata = [
 		"name": "general",
 		"description": "Operations to get general information.",
 	},
-	{
-	    "name": "units",
-	    "description": "Operations correlating to getting information about the units of the game War Thunder.",
-	},
+	#{
+	#    "name": "units",
+	#    "description": "Operations correlating to getting information about the units of the game War Thunder.",
+	#},
 	{
 		"name": "users",
 		"description": "Operations to get information about the users/players.",
@@ -89,7 +89,7 @@ app.add_exception_handler(
 app.include_router(auth_router.router, prefix="/v1")
 app.include_router(clans_router.router, prefix="/v1")
 app.include_router(general_router.router, prefix="/v1")
-app.include_router(units_router.router, prefix="/v1")
+#app.include_router(units_router.router, prefix="/v1")
 app.include_router(users_router.router, prefix="/v1")
 app.include_router(replays_router.router, prefix="/v1")
 app.include_router(marketplace_router.router, prefix="/v1")
