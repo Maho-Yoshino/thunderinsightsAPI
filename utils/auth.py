@@ -23,13 +23,12 @@ from base64 import b64encode
 from hashlib import md5
 from tools import Request
 
-from utils.helper import StringTimeToTimedelta, dtToTimestamp
+from utils.helper import dtToTimestamp
 from utils.network import NetworkManager
 
 _logger = getLogger(__name__)
 
-checkInterval = StringTimeToTimedelta(getenv("CHECK_INTERVAL"))
-refreshIfLessMinutes = int(getenv("REFRESH_IF_LESS_MINS", 15))
+refreshIfLessMinutes = 30
 if refreshIfLessMinutes > 60:
 	raise AssertionError("The env variable REFRESH_IF_LESS_MINS cannot exceed 60 minutes")
 if refreshIfLessMinutes <= 0:
