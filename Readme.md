@@ -108,3 +108,8 @@ chmod +x ./run ./setup
 ## Contributions  
 Contributions are welcome.  
 Pull requests that improve ThunderAPI without breaking existing functionality are encouraged  
+
+## License  
+
+ThunderAPI is licensed under the Apache License 2.0.  
+See the [LICENSE](LICENSE) file for details.  
