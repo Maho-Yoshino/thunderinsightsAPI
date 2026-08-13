@@ -9,8 +9,11 @@ from uvicorn import run as uvicorn_run
 from os import getenv, path
 from pathlib import Path
 from contextlib import asynccontextmanager
-from os import chdir, path
+from os import path
 from dotenv import load_dotenv
+
+if not load_dotenv(".env"):
+	raise FileNotFoundError(".env file could not be loaded.")
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -116,14 +119,8 @@ app.openapi = custom_openapi
 #endregion
 
 def main():
-	chdir(path.dirname(path.abspath(__file__)))
-	if not load_dotenv(".env"):
-		raise FileNotFoundError(".env file could not be loaded.")
 
-	debug:bool
-	# region Debug mode setup
 	debug = int(getenv("DEBUG_MODE", "0")) == 1
-	# endregion
 	# region Logging
 	def log_namer(default_name:str):
 		dirname = path.dirname(default_name)

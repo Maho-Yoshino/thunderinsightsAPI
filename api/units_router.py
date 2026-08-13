@@ -1,12 +1,10 @@
 from os import getenv
 from typing_extensions import Annotated
-from typing import Literal, Any
-from fastapi import APIRouter, Query, Path, Request, Depends
-from fastapi.responses import JSONResponse
-from utils import users_cache, vehicle_cache
+from fastapi import APIRouter, Path, Request, Depends
+from utils import vehicle_cache
 from utils.auth import UserTokenCache
 from api.models import Units
-from api.shared import IpString, limiter, get_auth
+from api.shared import limiter, get_auth
 
 router = APIRouter(
 	tags=["units"],

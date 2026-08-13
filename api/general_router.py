@@ -1,11 +1,10 @@
 from os import getenv
 from typing_extensions import Annotated
 from typing import Literal, Any
-from fastapi import APIRouter, Query, Path, Request, Depends
+from fastapi import APIRouter, Query, Request, Depends
 from fastapi.responses import JSONResponse
-from utils import users_cache, networkManager
+from utils import networkManager
 from utils.auth import UserTokenCache
-from utils.replayParser import Replay
 from datetime import datetime, UTC
 from bs4 import BeautifulSoup, Tag
 from enum import IntEnum

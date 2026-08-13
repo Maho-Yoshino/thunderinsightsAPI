@@ -1,6 +1,5 @@
 from fastapi import HTTPException
 from enum import StrEnum, Enum
-from utils import users_cache
 from datetime import datetime, UTC
 from tools import Request
 from utils.auth import UserTokenCache
