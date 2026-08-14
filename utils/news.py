@@ -1,4 +1,4 @@
-from asyncio import Task, Lock
+from asyncio import Task, Lock, CancelledError
 from logging import getLogger, Logger
 from utils.network import NetworkManager, WebsocketManager
 from datetime import datetime, time, UTC
@@ -148,18 +148,43 @@ class NewsManager:
 
 	async def mainloop(self):
 		while True:
-			if (latest := await self._get_new_news()):
-				self._logger.debug("News have been posted since last check")
-				for news in latest:
-					await self.websocket_mgr.broadcast(news.to_json())
-			if (latest := await self._get_new_changelogs()):
-				self._logger.debug("Changelogs have been posted since last check")
-				for news in latest:
-					await self.websocket_mgr.broadcast(news.to_json())
-			latest = await self._get_major_changelog()
-			if latest:
-				self._logger.debug("New major update changelog posted")
-				await self.websocket_mgr.broadcast(latest.to_json())
+			try:
+				if (latest := await self._get_new_news()):
+					self._logger.debug("News have been posted since last check")
+					for news in latest:
+						await self.websocket_mgr.broadcast(news.to_json())
+			except CancelledError:
+				raise
+			except Exception:
+				self._logger.exception("An exception occurred during news fetching")
+
+			try:
+				changelogs = await self.fetchChangelogs()
+
+				try:
+					if (latest := await self._get_new_changelogs(changelogs)):
+						self._logger.debug("Changelogs have been posted since last check")
+						for news in latest:
+							await self.websocket_mgr.broadcast(news.to_json())
+				except CancelledError:
+					raise
+				except Exception:
+					self._logger.exception("An exception occurred during changelog processing")
+
+				try:
+					if (latest := await self._get_major_changelog(changelogs)):
+						self._logger.debug("New major update changelog posted")
+						await self.websocket_mgr.broadcast(latest.to_json())
+				except CancelledError:
+					raise
+				except Exception:
+					self._logger.exception("An exception occurred during major changelog processing")
+
+			except CancelledError:
+				raise
+			except Exception:
+				self._logger.exception("An exception occurred during changelog fetching")
+			
 			await sleep(self.__calcDelay())
 
 	async def fetch(self) -> list[NewsEntry]:
@@ -230,16 +255,15 @@ class NewsManager:
 				final_changelogs.append(await processChangelog(chlog))
 		return final_changelogs
 
-	async def _get_major_changelog(self) -> None|NewsEntry:
+	async def _get_major_changelog(self, changelogs:list[NewsEntry]) -> None|NewsEntry:
 		"""Returns `None` if no new major update changelog has been posted"""
-		changelogs = await self.fetchChangelogs()
 		majorChLog = changelogs[0]
 		if majorChLog.id != self.lastMajorChLog:
 			await self._writeID(majorChLog.id, self._IDTYPE.MAJOR_CHLOG)
 			return majorChLog
 		return None
 
-	async def _get_new_changelogs(self):
+	async def _get_new_changelogs(self, changelogs:list[NewsEntry]):
 		changelogs = await self.fetchChangelogs()
 		# i[0] is the pinned major update changelog
 		# i[1] is the latest actual changelog
