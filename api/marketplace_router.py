@@ -192,20 +192,20 @@ async def searchItem(
     return data
 
 @router.get(
-    "/{vehicleHash}/orders/history",
-    summary="Retrieves marketplace history data about the given vehicle"
+    "/{itemHash}/orders/history",
+    summary="Retrieves marketplace history data about the given item"
 )
 @limiter.shared_limit("trade", getenv("REGULAR_RATE_LIMIT", "30/minute"))
-async def get_vehicle_history(
+async def get_item_history(
     request: faRequest,
-    vehicleHash: Annotated[str, Path(title="The vehicle to look up")],
+    itemHash: Annotated[str, Path(title="The item to look up")],
     user: UserTokenCache.Entry = Depends(get_auth)
 ):
     pairData = await Request.send_template(
         user,
         "cln_get_pair_stat",
         body={
-            "market_name":vehicleHash
+            "market_name":itemHash
         }
     )
     if "response" in pairData:
@@ -232,20 +232,20 @@ async def get_vehicle_history(
     return ret_data
 
 @router.get(
-    "/{vehicleHash}/orders",
-    summary="Retrieves marketplace data about the given vehicle"
+    "/{itemHash}/orders",
+    summary="Retrieves marketplace data about the given item"
 )
 @limiter.shared_limit("trade", getenv("REGULAR_RATE_LIMIT", "30/minute"))
-async def get_Vehicle_orders(
+async def get_item_orders(
     request: faRequest,
-    vehicleHash: Annotated[str, Path(title="The vehicle to look up")],
+    itemHash: Annotated[str, Path(title="The item to look up")],
     user: UserTokenCache.Entry = Depends(get_auth)
 ):
     books_brief = await Request.send_template(
         user,
         "cln_books_brief",
         body={
-            "market_name": vehicleHash
+            "market_name": itemHash
         }
     )
     if "response" in books_brief:
@@ -261,27 +261,27 @@ async def get_Vehicle_orders(
     return ret_data
 
 @router.get(
-    "/{vehicleHash}/view",
-    summary="Views the vehicle ingame"
+    "/{itemHash}/view",
+    summary="Views the item ingame"
 )
 @limiter.shared_limit("trade", getenv("REGULAR_RATE_LIMIT", "30/minute"))
-async def view_vehicle(
+async def view_item(
     request: faRequest,
-    vehicleHash: Annotated[str, Path(title="The vehicle's hash to view")],
+    itemHash: Annotated[str, Path(title="The item's hash to view")],
     user: UserTokenCache.Entry = Depends(get_auth)
 ) -> bool:
     hashData = await Request.send_template(
         user,
         "cln_market_get_asset_class",
         body={
-            "name":vehicleHash
+            "name":itemHash
         }
     )
     if "response" not in hashData or "asset_class" not in hashData["response"]:
-        raise HTTPException(404, "Vehicle not found")
+        raise HTTPException(404, "Item not found")
     hashData = hashData["response"]["asset_class"]
     if len(hashData) <= 0:
-        raise HTTPException(404, "Vehicle not found")
+        raise HTTPException(404, "Item not found")
     resp = await Request.send_template(
         user,
         "market_view_item1",
@@ -304,27 +304,27 @@ async def view_vehicle(
     return resp.get("status") == "ok"
 
 @router.get(
-    "/{vehicleHash}",
-    summary="Gets metadata about the given vehicle"
+    "/{itemHash}",
+    summary="Gets metadata about the given item"
 )
 @limiter.shared_limit("trade", getenv("REGULAR_RATE_LIMIT", "30/minute"))
-async def get_vehicle(
+async def get_item(
     request: faRequest,
-    vehicleHash: Annotated[str, Path(title="The vehicle to look up")],
+    itemHash: Annotated[str, Path(title="The item to look up")],
     user: UserTokenCache.Entry = Depends(get_auth)
 ):
     hashData = await Request.send_template(
         user,
         "cln_market_get_asset_class",
         body={
-            "name":vehicleHash
+            "name":itemHash
         }
     )
     if "response" not in hashData or "asset_class" not in hashData["response"]:
-        raise HTTPException(404, "Vehicle not found")
+        raise HTTPException(404, "Item not found")
     hashData = hashData["response"]["asset_class"]
     if len(hashData) <= 0:
-        raise HTTPException(404, "Vehicle not found")
+        raise HTTPException(404, "Item not found")
     resp = await Request.send_template(
         user,
         "GetAssetClassInfo",
@@ -334,7 +334,7 @@ async def get_vehicle(
         }
     )
     if "result" not in resp or "asset" not in resp["result"]:
-        raise HTTPException(404, "Vehicle data could not be obtained")
+        raise HTTPException(404, "Item data could not be obtained")
     resp = resp["result"]["asset"]
     ret_data = {}
 
