@@ -1,4 +1,4 @@
-from asyncio import Task, Lock, create_task
+from asyncio import Task, Lock
 from logging import getLogger, Logger
 from utils.network import NetworkManager, WebsocketManager
 from datetime import datetime, time, UTC
@@ -115,6 +115,7 @@ class NewsManager:
 	class _IDTYPE(Enum):
 		NEWS = 0, "lastNews"
 		CHANGELOG = 1, "lastChangelog"
+		MAJOR_CHLOG = 2, "lastMajorChLog"
 	lastNews:int
 	lastChangelog:int
 	_logger: Logger
@@ -140,6 +141,7 @@ class NewsManager:
 		content = loads(self._ids_json.read_text())
 		self.lastNews = int(content.get(self._IDTYPE.NEWS.value[1]))
 		self.lastChangelog = int(content.get(self._IDTYPE.CHANGELOG.value[1]))
+		self.lastMajorChLog = int(content.get(self._IDTYPE.MAJOR_CHLOG.value[1]))
 
 		self._logger.debug("NewsAPI initialized")
 
@@ -150,13 +152,15 @@ class NewsManager:
 				self._logger.debug("News have been posted since last check")
 				for news in latest:
 					await self.websocket_mgr.broadcast(news.to_json())
-				await self._writeID(latest[-1], self._IDTYPE.NEWS)
 			latest = await self._get_new_changelogs()
 			if latest and latest[-1].id != self.lastChangelog:
-				self._logger.debug("News have been posted since last check")
+				self._logger.debug("Changelogs have been posted since last check")
 				for news in latest:
 					await self.websocket_mgr.broadcast(news.to_json())
-				await self._writeID(latest[-1], self._IDTYPE.NEWS)
+			latest = await self._get_major_changelog()
+			if latest:
+				self._logger.debug("New major update changelog posted")
+				await self.websocket_mgr.broadcast(latest.to_json())
 			await sleep(self.__calcDelay())
 
 	async def fetch(self) -> list[NewsEntry]:
@@ -227,21 +231,39 @@ class NewsManager:
 				final_changelogs.append(await processChangelog(chlog))
 		return final_changelogs
 
+	async def _get_major_changelog(self) -> None|NewsEntry:
+		"""Returns `None` if no new major update changelog has been posted"""
+		changelogs = await self.fetchChangelogs()
+		majorChLog = changelogs[0]
+		if majorChLog.id != self.lastMajorChLog:
+			await self._writeID(majorChLog.id, self._IDTYPE.MAJOR_CHLOG)
+			return majorChLog
+		return None
+
 	async def _get_new_changelogs(self):
 		changelogs = await self.fetchChangelogs()
+		# i[0] is the pinned major update changelog
+		# i[1] is the latest actual changelog
+		changelogs = changelogs[1:]
+
 		for i, item in enumerate(changelogs):
 			if item.id == self.lastChangelog: 
-				return changelogs[:i]
-		self.lastNews = changelogs[0].id
-		await self._writeID(self.lastNews, self._IDTYPE.CHANGELOG)
+				await self._writeID(changelogs[0], self._IDTYPE.CHANGELOG)
+				return changelogs[1:i]
+
+		# None of the changelogs have been posted yet
+		await self._writeID(changelogs[0], self._IDTYPE.CHANGELOG)
 		return []
 	async def _get_new_news(self):
 		news = await self.fetchNews()
+
 		for i, item in enumerate(news):
 			if item.id == self.lastNews: 
+				await self._writeID(news[0], self._IDTYPE.NEWS)
 				return news[:i]
-		self.lastNews = news[0].id
-		await self._writeID(self.lastNews, self._IDTYPE.NEWS)
+
+		# None of the news have been posted yet
+		await self._writeID(news[0], self._IDTYPE.NEWS)
 		return []
 
 	async def _writeID(self, ID:int|NewsEntry, _type:_IDTYPE):
