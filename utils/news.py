@@ -136,24 +136,23 @@ class NewsManager:
 		if (not self._ids_json.exists()):
 			self._ids_json.write_text(dumps({
 				self._IDTYPE.NEWS.value[1]: 0,
-				self._IDTYPE.CHANGELOG.value[1]: 0
+				self._IDTYPE.CHANGELOG.value[1]: 0,
+				self._IDTYPE.MAJOR_CHLOG.value[1]: 0
 			}))
 		content = loads(self._ids_json.read_text())
-		self.lastNews = int(content.get(self._IDTYPE.NEWS.value[1]))
-		self.lastChangelog = int(content.get(self._IDTYPE.CHANGELOG.value[1]))
-		self.lastMajorChLog = int(content.get(self._IDTYPE.MAJOR_CHLOG.value[1]))
+		self.lastNews = int(content.get(self._IDTYPE.NEWS.value[1], 0))
+		self.lastChangelog = int(content.get(self._IDTYPE.CHANGELOG.value[1], 0))
+		self.lastMajorChLog = int(content.get(self._IDTYPE.MAJOR_CHLOG.value[1], 0))
 
 		self._logger.debug("NewsAPI initialized")
 
 	async def mainloop(self):
 		while True:
-			latest = await self._get_new_news()
-			if latest and latest[-1].id != self.lastNews:
+			if (latest := await self._get_new_news()):
 				self._logger.debug("News have been posted since last check")
 				for news in latest:
 					await self.websocket_mgr.broadcast(news.to_json())
-			latest = await self._get_new_changelogs()
-			if latest and latest[-1].id != self.lastChangelog:
+			if (latest := await self._get_new_changelogs()):
 				self._logger.debug("Changelogs have been posted since last check")
 				for news in latest:
 					await self.websocket_mgr.broadcast(news.to_json())
@@ -249,7 +248,7 @@ class NewsManager:
 		for i, item in enumerate(changelogs):
 			if item.id == self.lastChangelog: 
 				await self._writeID(changelogs[0], self._IDTYPE.CHANGELOG)
-				return changelogs[1:i]
+				return changelogs[:i]
 
 		# None of the changelogs have been posted yet
 		await self._writeID(changelogs[0], self._IDTYPE.CHANGELOG)
