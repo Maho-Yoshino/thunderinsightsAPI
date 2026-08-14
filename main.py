@@ -18,7 +18,7 @@ if not load_dotenv(".env"):
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-from utils import users_cache, networkManager
+from utils import users_cache, networkManager, newsManager
 from api import users_router, clans_router, general_router, auth_router, units_router, replays_router, marketplace_router
 from api.shared import limiter
 
@@ -61,10 +61,16 @@ tags_metadata = [
 async def lifespan(app: FastAPI):
 	await users_cache.start()
 	await networkManager.start()
+	newsManager.task = asyncio.create_task(newsManager.mainloop())
 
 	try:
 		yield
 	finally:
+		newsManager.task.cancel()
+		try:
+			await newsManager.task
+		except asyncio.CancelledError:
+			pass
 		await users_cache.close()
 		await networkManager.close()
 

@@ -595,7 +595,7 @@ class UserTokenCache:
 		async with self._transaction() as cur:
 			rows = await (await cur.execute(f"SELECT * FROM {schema.tokens.t()} WHERE {schema.tokens.JWT_EXPIRES} > strftime('%s', 'now')")).fetchall()
 		for row in rows:
-			entry = self.Entry(row, self)
+			entry = await self.Entry.from_row(self, row)
 			try:
 				if entry.usedWithin(30):
 					await entry.refresh()

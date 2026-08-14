@@ -1,11 +1,42 @@
 from aiohttp import ClientResponse, ClientSession
 from fastapi.concurrency import asynccontextmanager 
-from fastapi import HTTPException
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from asyncio import Lock, Event
 from typing import Any
 from json import loads
 
 class NetworkError(HTTPException): pass
+
+class WebsocketManager:
+	_connections: set[WebSocket]
+	_lock: Lock
+
+	def __init__(self):
+		self._connections = set()
+		self._lock = Lock()
+
+	async def connect(self, ws: WebSocket):
+		await ws.accept()
+		async with self._lock:
+			self._connections.add(ws)
+		try:
+			while True:
+				await ws.receive()
+		except (WebSocketDisconnect, RuntimeError):
+			await self.disconnect(ws)
+		
+	async def disconnect(self, ws: WebSocket):
+		async with self._lock:
+			self._connections.discard(ws)
+
+	async def broadcast(self, message: dict):
+		async with self._lock:
+			targets = list(self._connections)
+		for ws in targets:
+			try:
+				await ws.send_json(message)
+			except Exception:
+				await self.disconnect(ws)   # prune dead sockets
 
 class NetworkManager:
 	def __init__(self):
@@ -18,19 +49,18 @@ class NetworkManager:
 
 	@asynccontextmanager
 	async def post(self, url:str, **kwargs):
-		async with self.operation() as session:
-			resp = await session.post(url, **kwargs)
+		async with self.request("POST", url, **kwargs) as resp:
 			yield resp
 	@asynccontextmanager
 	async def get(self, url:str, **kwargs):
-		async with self.operation() as session:
-			resp = await session.get(url, **kwargs)
+		async with self.request("GET", url, **kwargs) as resp:
 			yield resp
 	@asynccontextmanager
 	async def request(self, method:str, url:str, **kwargs):
 		async with self.operation() as session:
-			resp = await session.request(method, url, **kwargs)
-			yield resp
+			async with session.request(method, url, **kwargs) as resp:
+				resp.raise_for_status()
+				yield resp
 
 	@asynccontextmanager
 	async def operation(self):

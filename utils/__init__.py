@@ -7,3 +7,6 @@ users_cache = UserTokenCache(networkManager)
 
 from utils.vehicleParser import Vehicles # Must be after users_cache declaration, due to using users_cache
 vehicle_cache = Vehicles()
+
+from utils.news import NewsManager
+newsManager = NewsManager(networkManager)

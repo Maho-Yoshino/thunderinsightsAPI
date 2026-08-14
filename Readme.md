@@ -21,7 +21,7 @@ This API uses a different design philosophy from `Thunderinsights`: each user au
 Automatically generated API documentation is available at `/docs` (by default, `http://127.0.0.1:8001/docs`).  
 
 ## Authentication  
-All endpoints outside of the `Authentication` category require an `Authorization: Bearer` header to be sent alongside the request, using a valid token obtained from `/v1/login`.  
+Almost all endpoints outside of the `Authentication` category require an `Authorization: Bearer` header to be sent alongside the request, using a valid token obtained from `/v1/login`.  
 Example:  
 ```bash  
 curl -X GET \  

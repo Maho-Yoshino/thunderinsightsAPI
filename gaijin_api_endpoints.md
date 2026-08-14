@@ -896,39 +896,69 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 ### https://static-ggc.gaijin.net/units/*.png  
 - GET request  
 - the `*` must be replaced with the internal name of a vehicle you want (e.g. "https://static-ggc.gaijin.net/units/uk_churchill_avre.png")  
-### https://newsfeed.gap.gaijin.net/api/patchnotes/warthunder/en/?platform=*  
-- GET request  
-- The `*` must be replaced with a platform (e.g. `linux64`)  
-- Gets the news currently shown in the `changelog` window  
-- Returns JSON  
-- Request form: `Not needed`  
-- Response form example:  
-	```json  
-	{  
-		"status": 200,  
-		"result": [  
-			{  
-				"title": "It’s fixed! №115 + Update 2.55.1.88",  
-				"rev": 5,  
-				"tags": [],  
-				"pinned": 0,  
-				"thumb": "https://patchnotes.cdn.gaijin.net/warthunder/Images/2026/Patchnotes/Fixed115_1500\.jpg",  
-				"customData": {},  
-				"kind": "patchnote",  
-				"titleshort": "It’s fixed! №115 + Update 2.55.1.88",  
-				"alwaysShowPopup": false,  
-				"targets": [  
-					"game"  
-				],  
-				"id": 376,  
-				"date": "2026-04-28T17:53:39",  
-				"type": "minor",  
-				"version": "2.55.1.88"  
-			},  
-			{...}  
-		]  
-	}  
-	```  
+### Newsfeed endpoints  
+#### https://newsfeed.gap.gaijin.net/api/patchnotes/warthunder/en/  
+- `GET` request  
+- GET parameters  
+	- `game`  
+		- `warthunder`  
+	- `platform`  
+		- `pc` (Windows)  
+		- `linux64`  
+		- `ps4`  
+		- `xbox`  
+	- `page` (zero-indexed)  
+	- `limit`  
+	- `offset`  
+- Response form:  
+	- `status` (HTTP Status code)  
+	- `result` (An array of dicts)  
+		- `title`  
+		- `rev`  
+		- `tags` (Array of strings)  
+			- ``  
+		- `pinned` (bool as an int)  
+		- `thumb` (URL to thumbnail)  
+		- `customData`  
+		- `kind`  
+			- `patchnote`  
+			- `minor`  
+			- `major`  
+			- `news`  
+		- `version`  
+			- Value is game version  
+			- Only shows up under `minor` and `major` news  
+		- `date`  
+			- ISO formatted datetime string  
+		- `alwaysShowPopup`  
+		- `targets` (array of values)  
+			- `game`  
+		- `id`  
+		- `titleShort` (Internal code for news entry)  
+#### https://newsfeed.gap.gaijin.net/api/patchnotes/warthunder/en/{news_id}  
+- `GET` request  
+- `news_id` is the ID returned by the previous endpoint  
+- Gives details about a specific news entry  
+- Return format  
+	- The values that match names with the previous version, share the same values, unless specified otherwise  
+	- `status`  
+	- `result`  
+		- `title`  
+		- `rev`  
+		- `tags`  
+		- `pinned`  
+		- `thumb`  
+		- `customData`  
+		- `kind`  
+		- `titleshort`  
+		- `alwaysShowPopup`  
+		- `targets`  
+		- `date`  
+		- `content`  
+			- Array of dicts, that dictate how to format the news (HTML-ish format)  
+			- Can be used to retrieve useful information out of news articles (e.g. event start, details, etc.)  
+		- `type`  
+		- `version`  
 ### https://api.gaijinent.com/item_info.php  
 - `POST` request  
 - Returns JSON  
@@ -979,7 +1009,18 @@ Not all endpoints shall be documented, as it would take forever to decode and do
 			- `publisher` (Pack vehicle)  
 ### https://login.gaijin.net/en/sso/getShortToken  
 ## Endpoints not used ingame  
-### http://newslist.gaijin.net:8080/news/warthunder/en/js  
+### http://newslist.gaijin.net:8080/news/{game}/en/js  
+- `GET` request  
+- Special thanks to SnailBot's source code, where the URL was found  
+- GET parameters  
+	- `game`  
+		- `warthunder`  
+		- `crossout`  
+		- `starconflict`  
+	- `offset`  
+- RSS feeds of this page  
+	- http://newslist.gaijin.net:8080/news/warthunder/en/rss  
+	- http://newslist.gaijin.net:8080/news/warthunder/en/atom  
 ### https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/\[pagenum\]/sort/dr_era5  
 ## Useful info through webscraping (no direct API)  
 ### https://warthunder.com/en/game/changelog/  
