@@ -257,6 +257,7 @@ class NewsManager:
 
 	async def _get_major_changelog(self, changelogs:list[NewsEntry]) -> None|NewsEntry:
 		"""Returns `None` if no new major update changelog has been posted"""
+		# i[0] is the pinned major update changelog
 		majorChLog = changelogs[0]
 		if majorChLog.id != self.lastMajorChLog:
 			await self._writeID(majorChLog.id, self._IDTYPE.MAJOR_CHLOG)
@@ -264,9 +265,7 @@ class NewsManager:
 		return None
 
 	async def _get_new_changelogs(self, changelogs:list[NewsEntry]):
-		changelogs = await self.fetchChangelogs()
-		# i[0] is the pinned major update changelog
-		# i[1] is the latest actual changelog
+		# i[1:] is the latest actual changelogs
 		changelogs = changelogs[1:]
 
 		for i, item in enumerate(changelogs):
