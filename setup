@@ -7,7 +7,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3.14}"
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "Error: '$PYTHON_BIN' is not installed or not in PATH."
   echo "Tip: install Python 3.14 or run with another interpreter:"
-  echo "  PYTHON_BIN=python3 ./setup.sh"
+  echo "  PYTHON_BIN=python3 ./setup"
   exit 1
 fi
 
@@ -35,7 +35,7 @@ run_or_fail() {
     echo "  getent hosts files.pythonhosted.org"
     echo "  getent hosts pypi.org"
     echo "If you use a mirror, run:"
-    echo "  PIP_INDEX_URL=https://<your-mirror>/simple ./setup.sh"
+    echo "  PIP_INDEX_URL=https://<your-mirror>/simple ./setup"
     deactivate 2>/dev/null || true
     exit 1
   fi

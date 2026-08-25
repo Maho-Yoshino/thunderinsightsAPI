@@ -6,6 +6,8 @@ slowapi
 fastapi
 uvicorn
 apscheduler
+requests
+python-multipart
 
 # Data processing
 lz4

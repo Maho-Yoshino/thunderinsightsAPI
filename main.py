@@ -1,6 +1,9 @@
+from dotenv import load_dotenv
+if not load_dotenv(".env"):
+	raise FileNotFoundError(".env file could not be loaded.")
+
 import logging, asyncio
 from logging.handlers import TimedRotatingFileHandler
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -9,11 +12,6 @@ from uvicorn import run as uvicorn_run
 from os import getenv, path
 from pathlib import Path
 from contextlib import asynccontextmanager
-from os import path
-from dotenv import load_dotenv
-
-if not load_dotenv(".env"):
-	raise FileNotFoundError(".env file could not be loaded.")
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
