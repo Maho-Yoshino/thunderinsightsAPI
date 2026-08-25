@@ -1,9 +1,9 @@
 {
-    "auth": "header",
-    "format": "blk",
     "headers": {
         "action":"cln_clan_leave",
-        "compr": "lz4hc"
+        "compr": "lz4hc",
+        "Content-Type": "application/octet-stream",
+        "token": "<replace>"
     },
     "body": {
         "comment":"comment"

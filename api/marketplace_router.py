@@ -53,17 +53,15 @@ async def sell_item(
         resp = await Request.send_template(
             user,
             "cln_market_sell",
-            body={
-                "transactid": randint(10**6, 10**15),
-                "reqstamp": dtToTimestampMs(datetime.now(UTC)),
-                "assetid": assetId,
-                "amount": 1,
-                "price": int(price*10000),
-                "seller_should_get": int(seller_should_get*10000),
-                "agree_stamp": agree_stamp,
-                "privateMode": anonymous,
-                "contextid": itemsInInv.contextid
-            }
+            transactid = randint(10**6, 10**15),
+            reqstamp = dtToTimestampMs(datetime.now(UTC)),
+            assetid = assetId,
+            amount = 1,
+            price = int(price*10000),
+            seller_should_get = int(seller_should_get*10000),
+            agree_stamp = agree_stamp,
+            privateMode = anonymous,
+            contextid = itemsInInv.contextid
         )
         solditems.append({
             "item": assetId,
@@ -96,15 +94,13 @@ async def buy_item(
     resp = await Request.send_template(
         user,
         "cln_market_buy",
-        body={
-            "transactid": randint(10**6, 10**15),
-            "reqstamp": dtToTimestampMs(datetime.now(UTC)),
-            "market_name": itemHash,
-            "amount": count,
-            "price": int(price*10000),
-            "agree_stamp": agree_stamp,
-            "privateMode": anonymous,
-        }
+        transactid = randint(10**6, 10**15),
+        reqstamp = dtToTimestampMs(datetime.now(UTC)),
+        market_name = itemHash,
+        amount = count,
+        price = int(price*10000),
+        agree_stamp = agree_stamp,
+        privateMode = anonymous
     )
     if "response" not in resp:
         raise HTTPException(500, "An unexpected error occurred")
@@ -165,11 +161,9 @@ async def searchItem(
     data = await Request.send_template(
         user,
         "cln_market_search",
-        body={
-            "count": count,
-            "skip": count*page,
-            "text": name
-        }
+        count = count,
+        skip = count*page,
+        text = name
     )
     if "response" in data:
         data:list[dict[str, Any]] = data["response"]["assets"]
@@ -204,9 +198,7 @@ async def get_item_history(
     pairData = await Request.send_template(
         user,
         "cln_get_pair_stat",
-        body={
-            "market_name":itemHash
-        }
+        market_name = itemHash
     )
     if "response" in pairData:
         pairData = pairData["response"]
@@ -244,9 +236,7 @@ async def get_item_orders(
     books_brief = await Request.send_template(
         user,
         "cln_books_brief",
-        body={
-            "market_name": itemHash
-        }
+        market_name = itemHash
     )
     if "response" in books_brief:
         books_brief = books_brief["response"]
@@ -273,9 +263,7 @@ async def view_item(
     hashData = await Request.send_template(
         user,
         "cln_market_get_asset_class",
-        body={
-            "name":itemHash
-        }
+        name = itemHash
     )
     if "response" not in hashData or "asset_class" not in hashData["response"]:
         raise HTTPException(404, "Item not found")
@@ -285,16 +273,14 @@ async def view_item(
     resp = await Request.send_template(
         user,
         "market_view_item1",
-        body={
-            "params":{
-                "appId": "1067",
-                "assetClass": [
-                    {
-                        "name": hashData[0]["name"],
-                        "value": hashData[0]["value"]
-                    }
-                ]
-            }
+        params = {
+            "appId": "1067",
+            "assetClass": [
+                {
+                    "name": hashData[0]["name"],
+                    "value": hashData[0]["value"]
+                }
+            ]
         }
     )
     await Request.send_template(
@@ -316,9 +302,7 @@ async def get_item(
     hashData = await Request.send_template(
         user,
         "cln_market_get_asset_class",
-        body={
-            "name":itemHash
-        }
+        name = itemHash
     )
     if "response" not in hashData or "asset_class" not in hashData["response"]:
         raise HTTPException(404, "Item not found")
@@ -328,10 +312,8 @@ async def get_item(
     resp = await Request.send_template(
         user,
         "GetAssetClassInfo",
-        body={
-            "class_name0": hashData[0]["name"],
-            "class_value0": hashData[0]["value"]
-        }
+        class_name0 = hashData[0]["name"],
+        class_value0 = hashData[0]["value"]
     )
     if "result" not in resp or "asset" not in resp["result"]:
         raise HTTPException(404, "Item data could not be obtained")

@@ -29,9 +29,7 @@ async def send_application(
     response = await Request.send_template(
         user, 
         "clan_membership_request",
-        body = {
-            "_id": clanId
-        }
+        _id=clanId
     )
     return response.get("clanTag") is not None
 @router.get(
@@ -92,10 +90,8 @@ async def accept_applicant(
     return await Request.send_template(
         user, 
         "clan_accept_membership_request",
-        userId=userId,
-        body={
-            "_id": await user.getSquadronId()
-        }
+        userId = userId,
+        _id = await user.getSquadronId()
     )
 
 @router.post(
@@ -116,11 +112,9 @@ async def reject_applicant(
     return await Request.send_template(
         user, 
         "clan_accept_membership_request",
-        userId=userId,
-        body={
-            "_id": await user.getSquadronId(),
-            "comments": message
-        }
+        userId = userId,
+        _id = await user.getSquadronId(),
+        comments = message
     )
 
 @router.post(
@@ -143,10 +137,8 @@ async def change_role(
     return await Request.send_template(
         user, 
         "clan_change_member_role",
-        userid=userId,
-        body={
-            "role": role.value
-        }
+        userid = userId,
+        role = role.value
     )
 
 @router.post(
@@ -164,10 +156,8 @@ async def kick_member(
     return await Request.send_template(
         user, 
         "clan_dismiss_member",
-        userId=userId,
-        body={
-            "comments": reason
-        }
+        userId = userId,
+        comments = reason
     )
 
 @router.post(
@@ -201,11 +191,9 @@ async def get_clan_logs(
     response = await Request.from_template(
         user, 
         "clan_get_log",
-        body = {
-            "_id":clanId,
-            "count":limit,
-            "events": "create;info"
-        }
+        _id = clanId,
+        count = limit,
+        events = "create;info"
     )
     if (allLogs):
         response.pop("events")

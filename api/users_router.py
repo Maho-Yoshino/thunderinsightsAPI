@@ -60,10 +60,8 @@ async def get_users_search(
     response = await Request.send_template(
         user, 
         "find_users_by_nick_prefix",
-        body={
-            "nick": unquote(nick),
-            "maxCount": limit
-        }
+        nick = unquote(nick),
+        maxCount = limit
     )
 
     terseInfo = await get_terse(user, *list(response.keys()))

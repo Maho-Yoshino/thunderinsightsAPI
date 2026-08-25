@@ -1,8 +1,8 @@
 {
-    "auth": "header",
-    "format": "json",
     "headers": {
-        "action":"cln_find_users_by_nick_prefix_json"
+        "token": "<replace>",
+        "action":"cln_find_users_by_nick_prefix_json",
+        "Content-Type": "application/json"
     },
     "body": {
         "ignoreCase": true,

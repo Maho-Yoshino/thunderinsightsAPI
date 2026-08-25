@@ -2,7 +2,6 @@ from __future__ import annotations
 from re import sub as re_sub, search as re_search
 from logging import getLogger
 from asyncio import sleep
-from aiohttp import ClientSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.job import Job
@@ -16,14 +15,12 @@ from secrets import token_urlsafe
 from pathlib import Path
 from enum import StrEnum
 from contextlib import asynccontextmanager
-from random import randint
 from jwt import decode as jwt_decode
 from dataclasses import dataclass, asdict, field
 from base64 import b64encode
 from hashlib import md5
-from tools import Request
 
-from utils.helper import dtToTimestamp
+from utils.helper import dtToTimestamp, AuthenticationError
 from utils.network import NetworkManager
 
 _logger = getLogger(__name__)
@@ -34,9 +31,6 @@ if refreshIfLessMinutes > 60:
 if refreshIfLessMinutes <= 0:
 	_logger.warning("The env variable REFRESH_IF_LESS_MINS is set to below 1, meaning it will basically never autorefresh the token")
 
-class AuthenticationError(HTTPException):
-	def __init__(self, status_code, detail = None, headers = None):
-		super().__init__(status_code, detail, headers)
 class TwoFactorRequired(AuthenticationError):
 	def __init__(self, types: set[str], request_id: str, user_id: int):
 		_ = {
@@ -219,30 +213,13 @@ class UserTokenCache:
 				self.jwt = content["jwt"]
 				self.jwt_expires = jwt_get_data(self.jwt).exp
 			await self._write_values()
-		
-		async def add_auth_headers(self, headerData: dict[str, Any], auth_bearer:bool = False) -> dict[str, Any]:
-			authTimeLeft = self.timeLeft()
-			if authTimeLeft <= timedelta(minutes=30):
-				await self.refresh()
-			elif authTimeLeft < timedelta(0):
-				raise AuthenticationError(401, "Your login has expired, please log in again to reauthenticate.")
-			if self.jwt:
-				if auth_bearer:
-					headerData["Authorization"] = f"Bearer {self.jwt}"
-				else:
-					headerData["token"] = self.jwt
-					headerData["uidHint"] = str(self.uidHint)
-					headerData["transactid"] = str(randint(0, 999999999999))
-
-				return headerData
-			else:
-				raise AuthenticationError(403, "Authentication required for this request, but no token is available. Please ensure you have logged in successfully.")
 
 		def timeLeft(self) -> timedelta:
 			return self.jwt_expires - datetime.now(UTC)
 		def usedWithin(self, minutes:int) -> bool:
 			return self.last_used > (datetime.now(UTC) - timedelta(minutes=minutes)) 
 		async def getSquadronId(self, throwOnNone:bool = True) -> int|None:
+			from tools import Request
 			userEntry = (await Request.send_template(
 				self,
 				"get_users_terse_info",

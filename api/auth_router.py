@@ -89,5 +89,5 @@ async def get_sid(
 ):
 	sid = await users_cache.get_sid(user.email, password)
 	if sid == None:
-		raise HTTPException(400, "Could not obtain sid value")
+		raise HTTPException(500, "Could not obtain sid value")
 	return JSONResponse({"status": "success"}, 200)

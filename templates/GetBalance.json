@@ -1,6 +1,8 @@
 {
-    "auth": "bearer",
-    "format": null,
     "method": "GET",
+    "host": "https://wallet.gaijin.net/GetBalance",
+    "headers": {
+        "Authorization": "<replace>"
+    },
     "action": "GetBalance"
 }

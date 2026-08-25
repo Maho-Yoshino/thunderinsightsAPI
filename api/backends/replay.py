@@ -33,23 +33,25 @@ async def search_replay(
 ):
     if user.sid is not None and user.sid.exp < datetime.now(UTC):
         raise HTTPException(401, "Identity SID expired. Please re-login to get a new one.")
+    elif user.sid is None:
+        raise HTTPException(401, "Identity SID not found. Please generate one using the `/v1/get-sid` endpoint")
     response = await Request.from_template(user, "replays_search")
-    response["limit"] = limit
-    response["page"] = page
+    response.body["limit"] = limit
+    response.body["page"] = page
     if uid is not None:
-        response["findUserType"] = "ID"
-        response["findUserValue"] = str(uid)
+        response.body["findUserType"] = "ID"
+        response.body["findUserValue"] = str(uid)
     elif nickname is not None:
-        response["findUserType"] = "USERNAME"
-        response["findUserValue"] = nickname
+        response.body["findUserType"] = "USERNAME"
+        response.body["findUserValue"] = nickname
     else:
-        response["findUserType"] = "USERNAME"
-        response["findUserValue"] = ""
+        response.body["findUserType"] = "USERNAME"
+        response.body["findUserValue"] = ""
 
-    response["gameType"] = gameType.value
-    response["techType"] = techType.value
+    response.body["gameType"] = gameType.value
+    response.body["techType"] = techType.value
     if mode is not None:
-        response["gameMode"] = [mode.value,]
+        response.body["gameMode"] = [mode.value,]
 
     response.headers["cookie"] = f"identity_sid={user.sid.sid}"
 

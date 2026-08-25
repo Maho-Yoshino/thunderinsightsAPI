@@ -1,7 +1,9 @@
 {
-    "auth": "body",
-    "format": "form",
+    "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+    },
     "body": {
+        "token": "<replace>",
         "action": "GetContextContents",
         "contextid": "<replace>",
         "appid": "1067"

@@ -1,8 +1,7 @@
 {
-    "auth": "header",
-    "format": null,
     "headers": {
         "action":"cln_clan_get_leaderboard",
-        "sortField": "dr_era5_hist"
+        "sortField": "dr_era5_hist",
+        "token": "<replace>"
     }
 }

@@ -19,7 +19,9 @@ class ServerPool(IntEnum):
 	VIEW_VEHICLE_PROXY = 10
 	WALLET = 11
 	
-def getAction(action:str):
+def getAction(action:str|None):
+	if action is None:
+		return None
 	try:
 		return Action[action]
 	except KeyError:

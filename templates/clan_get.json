@@ -1,7 +1,7 @@
 {
-    "auth": "header",
     "headers": {
         "action":"cln_clan_get",
-        "clanId":"<replace>"
+        "clanId":"<replace>",
+        "token": "<replace>"
     }
 }

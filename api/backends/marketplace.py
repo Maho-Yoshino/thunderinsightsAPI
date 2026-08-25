@@ -11,9 +11,7 @@ async def get_asset_class(user: UserTokenCache.Entry, hash:str) -> list[dict[str
     return await Request.send_template(
         user,
         "cln_market_get_asset_class",
-        body={
-            "name": hash
-        }
+        name = hash
     )
 
 #region Inventory
@@ -72,9 +70,7 @@ async def get_inventory(user: UserTokenCache.Entry) -> list[InventoryItem]:
                 user,
                 "GetContextContents",
                 session=session,
-                body={
-                    "contextid": context["id"]
-                }
+                contextid = context["id"]
             )
             if "result" not in ctx_data:
                 continue
@@ -83,10 +79,8 @@ async def get_inventory(user: UserTokenCache.Entry) -> list[InventoryItem]:
                     user,
                     "GetAssetClassInfo",
                     session=session,
-                    body={
-                        "class_name0": item["class"][0]["name"],
-                        "class_value0": item["class"][0]["value"]
-                    }
+                        class_name0 = item["class"][0]["name"],
+                        class_value0 = item["class"][0]["value"]
                 )
                 if "result" not in item_data:
                     continue

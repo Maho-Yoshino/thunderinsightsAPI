@@ -1,37 +1,21 @@
-import json as _json
-from os import getenv
-from typing import Literal, Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from fastapi import HTTPException
 from logging import getLogger
 from aiohttp import ClientResponse, ClientSession
 from requests import get as req_get
-from json import loads
-from requests.exceptions import JSONDecodeError, SSLError
+from requests.exceptions import SSLError
 from datetime import timedelta
-from subprocess import run as _run
-from random import choice
+from random import choice, randint
 from templates import TEMPLATES, load as load_template
-from .json_to_blk import json_to_blkx, blkx_to_blk, compress_lz4hc, compress_bzip2, find_binblk
-from json import dumps
-from .hex_to_json import lz4_decompress_try, bzip_decompress_try
+from json import dumps, loads, JSONDecodeError
 from .const import Action, UserAction, ServerPool, GaijinErrorCodes, getAction
 from utils import networkManager
+from utils.helper import AuthenticationError
+from .blk_utils import Compress, Decompress
 if TYPE_CHECKING:
 	from utils import UserTokenCache
 
 _logger = getLogger(__name__)
-
-_binblk = find_binblk(getenv("BINBLK_PATH", None))
-
-def blk_to_json(data: bytes) -> dict[str, Any]:
-	"""Decode binary .blk (compressed or raw) to a JSON dict via wt_ext_cli."""
-	result = _run(
-		["wt_ext_cli", "unpack_raw_blk", "--stdin", "--stdout", "--format", "Json"],
-		input=data, capture_output=True,
-	)
-	if result.returncode != 0:
-		raise RuntimeError(f"wt_ext_cli failed: {result.stderr.decode()}")
-	return _json.loads(result.stdout)
 
 #region Fetch server list once at import
 try:
@@ -40,7 +24,7 @@ except SSLError:
 	_resp = req_get("https://public-configs.warthunder.com/production/network.blk")
 if not _resp.ok:
 	raise RuntimeError(f"Failed to fetch server list: {_resp.status_code}")
-_cfg = blk_to_json(_resp.content)["production"]
+_cfg = Decompress(_resp.content)["production"]
 char_servers: list[str] = _cfg["charServer"]
 inv_proxies: list[str] = _cfg["inventory"]["servers"]["url"]
 userstat_proxies: list[str] = _cfg["userstat"]["servers"]["url"]
@@ -60,30 +44,32 @@ SERVER_URLS: dict[ServerPool, list[str]] = {
 	ServerPool.MARKET_CHAR: ["https://market-proxy.gaijin.net/char"],
 	ServerPool.MARKET: ["https://market-proxy.gaijin.net/market"],
 	ServerPool.MARKET_ASSET: ["https://market-proxy.gaijin.net/assetAPI"],
-	ServerPool.VIEW_VEHICLE_PROXY: ["https://login.gaijin.net/proxy/api/matching/notifyClient"],
-	ServerPool.WALLET: ["https://wallet.gaijin.net/GetBalance"]
 }
 def get_server(action: Action|UserAction) -> str:
 	return choice(SERVER_URLS[action.value[1]])
 #endregion
 
-class Request(dict):
-	"""Dict-backed request with headers, wire-format encoding, and .request() shortcut."""
-	response:dict[str, Any]|None
-	login: UserTokenCache.Entry = None
+class Request:
+	"""Request framework for sending messages to Gaijin's servers"""
+	user: UserTokenCache.Entry = None
 	session = None
+
+	body: dict[str, Any]
+	headers: dict[str, Any]
+	host: str|None = None
+	method: str
+	action: Action|UserAction
 	def __init__(
 		self,
 		action: Action|UserAction, 
 		body: dict[str, Any] | None = None,
 		headers: dict[str, Any] | None = None,
-		send_format: Literal["json", "blk", "form"]|None = None,
-		login: UserTokenCache.Entry = None,
+		user: UserTokenCache.Entry = None,
 		host:str|None = None,
 		method:str = "POST",
 		session:ClientSession|None=None
 	):
-		super().__init__(body if body is not None else {})
+		self.body = body
 		self.headers = {
 			"Accept": "*/*",
 			"Accept-Encoding": "deflate, gzip, br, zstd",
@@ -95,19 +81,18 @@ class Request(dict):
 		}
 		if headers:
 			self.headers.update(headers)
-		self.format = send_format
-
-		if action is None:
-			raise RuntimeError("No action provided")
-		self.action = action
 
 		if host is not None:
 			self.url = host
 		else:
 			self.url = get_server(self.action)
+
+		if action is None and host is None:
+			raise RuntimeError("No action provided")
+		self.action = action
+
 		self.method = method
-		self.login = login
-		self.response = None  # Placeholder for storing the response of a request if needed
+		self.user = user
 		self.session = session
 
 	@classmethod
@@ -120,13 +105,6 @@ class Request(dict):
 		headers = tpl.get("headers", {})
 		body = tpl.get("body", {})
 
-		if auth := tpl.get("auth", None):
-			if auth == "header":
-				headers = await user.add_auth_headers(headers)
-			elif auth == "body":
-				body = await user.add_auth_headers(body)
-			elif auth == "bearer":
-				headers = await user.add_auth_headers(headers, True)
 		if "action" in tpl:
 			action = getAction(tpl["action"])
 		elif "action" in headers:
@@ -138,20 +116,23 @@ class Request(dict):
 
 		self = cls(
 			body=body, 
-			headers=headers, 
-			send_format=tpl.get("format", "json"),
-			login=user,
+			headers=headers,
+			user=user,
 			host=tpl.get("host", None),
 			method=tpl.get("method", "POST"),
 			action=action,
 			session=session
 		)
+		await self.add_auth_headers()
 		for key, value in data.items():
-			if key.lower() == "body":
-				for k, v in value.items():
-					self[k] = v
+			if key in self.body and key in self.headers:
+				raise RuntimeError(f"Key `{key}` found in both headers and body for template `{template}`")
+			elif key in self.body:
+				self.body[key] = value
+			elif key in self.headers:
+				self.headers[key] = value
 			else:
-				self.headers[key] = str(value)
+				raise RuntimeError(f"Unknown key `{key}` provided. Please edit template `{template}`")
 		return self
 
 	@staticmethod
@@ -159,85 +140,86 @@ class Request(dict):
 		cls = await Request.from_template(user, template, session=session, **data)
 		return await cls.send()
 
-	def _encode(self, compress: Literal["lz4hc", "bzip2"] | None = None) -> bytes:
-		blkx = json_to_blkx(self)
-		blk = blkx_to_blk(blkx.encode(), _binblk)
-		if compress == "lz4hc":
-			return compress_lz4hc(blk)
-		if compress == "bzip2":
-			return compress_bzip2(blk)
-		return blk
+	async def add_auth_headers(self):
+		authTimeLeft = self.user.timeLeft()
+		if authTimeLeft <= timedelta(minutes=30):
+			await self.user.refresh()
+		elif authTimeLeft < timedelta():
+			raise AuthenticationError(401, "Your login has expired, please log in again to reauthenticate.")
+		if self.user.jwt:
+			if "Authorization" in self.body:
+				self.body["Authorization"] = f"Bearer {self.user.jwt}"
+			elif "token" in self.body:
+				self.body["token"] = self.user.jwt
+				self.body["uidHint"] = str(self.user.uidHint)
+				self.body["transactid"] = str(randint(0, 999999999999))
+			elif "Authorization" in self.headers:
+				self.headers["Authorization"] = f"Bearer {self.user.jwt}"
+			elif "token" in self.headers:
+				self.headers["token"] = self.user.jwt
+				self.headers["uidHint"] = str(self.user.uidHint)
+				self.headers["transactid"] = str(randint(0, 999999999999))
+			return
+		else:
+			raise AuthenticationError(403, "Authentication required for this request, but no token is available. Please ensure you have logged in successfully.")
 
 	async def send(self) -> dict[str, Any]:
 		if self.action is None and self.url is None: return
 		kwargs: dict[str, Any] = {"headers": self.headers}
-		for k, v in self.items():
-			if v == "<replace>":
-				raise HTTPException(500, f"[{self.action.name}] Body value `{k}` is not replaced by code")
+		for key, value in self.body.items():
+			if value == "<replace>":
+				raise HTTPException(500, f"[{self.action.name}] Body value `{key}` is not replaced by code")
+			elif key == "<replace>":
+				raise HTTPException(500, f"[{self.action.name}] Body key with value `{value}` is not replaced by code")
+
 		for header, value in kwargs["headers"].items():
 			if value == "<replace>":
-				raise HTTPException(500, f"[{self.action.name}] Header value `{k}` is not replaced by code")
+				raise HTTPException(500, f"[{self.action.name}] Header value `{header}` is not replaced by code")
+			elif header == "<replace>": 
+				raise HTTPException(500, f"[{self.action.name}] Header key with value `{value}` is not replaced by code")
 			if isinstance(value, (bytes, str)):
 				continue
 			elif isinstance(value, dict):
 				kwargs["headers"][header] = "; ".join(f"{k}={v}" for k, v in value.items())
+			elif isinstance(value, list):
+				kwargs["headers"][header] = ";".join(str(i) for i in value)
 			else:
 				kwargs["headers"][header] = str(value)
-		if self.format == "json":
-			kwargs["json"] = self
-		elif self.format == "form":
-			kwargs["headers"]["Content-Type"] = "application/x-www-form-urlencoded"
-			if self.url == SERVER_URLS[ServerPool.VIEW_VEHICLE_PROXY][0]:
-				kwargs["data"] = dumps(dict(self))
-			else:
-				kwargs["data"] = dict(self) # TODO: New code
-		elif self.format != None:
-			compr = self.headers.get("compr", None)
-			kwargs["data"] = self._encode(compress=compr)
-			kwargs["headers"] = {**self.headers, "Content-Type": "application/octet-stream"}
-			if compr:
-				kwargs["headers"]["compr"] = compr
+
+		match self.headers["Content-Type"]:
+			case "application/x-www-form-urlencoded":
+				if self.action == UserAction.market_view_item:
+					kwargs["data"] = dumps(self.body)
+				else:
+					kwargs["data"] = self.body # TODO: New code
+			case "application/octet-stream":
+				kwargs["data"] = Compress(self.body, self.headers.get("compr"))
+			case "application/json":
+				kwargs["json"] = self.body
+			case _:
+				raise NotImplementedError(f"Content-Type value '{self.headers["Content-Type"]}' not implemented")
 
 		if self.session is None:
 			async with networkManager.request(self.method.upper(), self.url, **kwargs) as resp:
-				await self._decode(resp)
+				response = await self._decode(resp)
 		else:
 			async with self.session.request(self.method.upper(), self.url, **kwargs) as resp:
-				await self._decode(resp)
-	
-		return self.result
+				response = await self._decode(resp)
 
-	async def _decode(self, response: ClientResponse) -> None:
+		return response
+
+	async def _decode(self, response: ClientResponse) -> dict[str, Any]:
 		"""Decode from compressed or raw .blk binary to json."""
 		content = await response.read()
 		if content == b"":
-			self.result = {}
-			return
+			return {}
 		if content.startswith(b"!ERROR:"):
 			GaijinErrorCodes.parse(content) # Throws an HTTPException
 		if content.startswith(b"!OK"):
-			self.result = {
+			return {
 				"status": "success"
 			}
-			return # Nothing to parse
 		try:
-			self.result = loads(content.decode("utf-8"))
-			return # If valid JSON, do not convert
-		except (JSONDecodeError, UnicodeDecodeError):
-			pass # Not valid JSON, continue on to decompressing and decoding
-		except Exception:
-			_logger.exception("An exception occurred while decoding the returned binary")
-			raise
-
-		# Try lz4hc decompress first, then bzip2
-		# if neither worked, it assumes the data is raw blk
-		if content[:1] != b"\x01" and len(content) > 4:
-			_ = lz4_decompress_try(content)
-			if _ is None:
-				_ = bzip_decompress_try(content)
-			if _ is not None:
-				content = _	
-		self.result = blk_to_json(content)
-
-	def to_json(self, indent: int | None = 2) -> str:
-		return _json.dumps(self, indent=indent, ensure_ascii=False)
+			return loads(content)
+		except JSONDecodeError:
+			return Decompress(content).as_dict()

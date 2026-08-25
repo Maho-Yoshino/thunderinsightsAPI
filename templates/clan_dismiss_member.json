@@ -1,10 +1,10 @@
 {
-    "auth": "header",
-    "format": "blk",
     "headers": {
+        "token": "<replace>",
         "action":"ano_clan_dismiss_member",
         "userid": "<replace>",
-        "compr": "lz4hc"
+        "compr": "lz4hc",
+        "Content-Type": "application/octet-stream"
     },
     "body": {
         "comments": "<replace>"

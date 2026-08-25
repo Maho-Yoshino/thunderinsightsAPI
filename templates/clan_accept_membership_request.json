@@ -1,9 +1,9 @@
 {
-    "auth": "header",
-    "format": "blk",
     "headers": {
+        "token": "<replace>",
         "action":"ano_clan_accept_membership_request",
-        "userId": "<replace>"
+        "userId": "<replace>",
+        "Content-Type": "application/octet-stream"
     },
     "body": {
         "_id": "<replace>",

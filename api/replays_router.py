@@ -1,6 +1,6 @@
 from os import getenv
 from typing_extensions import Annotated
-from fastapi import APIRouter, Path, Request as faRequest, Form, Depends
+from fastapi import APIRouter, Path, Request as faRequest, Depends, Query
 from utils.replayParser import Replay
 from utils.auth import UserTokenCache
 from api.backends.replay import *
@@ -26,15 +26,15 @@ async def search_replays(
 	request: faRequest,
 	uid: Annotated[
 		int, 
-		Form(title="The UID of the user to search replays for")
+		Query(title="The UID of the user to search replays for")
 	] = None,
 	nickname: Annotated[
 		str, 
-		Form(title="The nickname of the user to search replays for")
+		Query(title="The nickname of the user to search replays for")
 	] = None,
 	gameType: Annotated[
 		ReplayType,
-		Form(
+		Query(
 			title="The type of game to search replays for",
 			description="If not provided, will search for random battles",
 			min_length=1
@@ -42,7 +42,7 @@ async def search_replays(
 	] = ReplayType.RANDOM_BATTLE,
 	techType: Annotated[
 		ReplayTechType,
-		Form(
+		Query(
 			title="The type of tech to search replays for",
 			description="If not provided, will search for all tech types",
 			min_length=1
@@ -50,14 +50,14 @@ async def search_replays(
 	] = ReplayTechType.ALL,
 	mode: Annotated[
 		ReplayMode,
-		Form(
+		Query(
 			title="The game modes to filter by",
 			description="If not provided, will search for all game modes",
 		)
 	] | None = None,
 	limit: Annotated[
 		int, 
-		Form(
+		Query(
 			title="The maximum number of replays to return",
 			description="Must be between 1 and 100",
 			ge=1,
@@ -66,7 +66,7 @@ async def search_replays(
 	] = 25,
 	page: Annotated[
 		int, 
-		Form(
+		Query(
 			title="The page of results to return",
 			description="Must be 0 or greater",
 			ge=0

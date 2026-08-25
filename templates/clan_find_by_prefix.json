@@ -1,7 +1,6 @@
 {
-    "auth": "header",
-    "format": null,
     "headers": {
+        "token": "<replace>",
         "action":"cln_clan_find_by_prefix",
         "namePrefix": "<replace>",
         "tagPrefix": "<replace>",
