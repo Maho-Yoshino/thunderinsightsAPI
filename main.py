@@ -180,7 +180,7 @@ def custom_swagger_ui():
 #region Privacy Policy
 @app.get("/privacy")
 def privacy_policy():
-	return RedirectResponse("https://github.com/Order-Of-The-Birb/ThunderAPI/README.md#privacy-policy")
+	return RedirectResponse("https://github.com/Order-Of-The-Birb/ThunderAPI/README.md#privacy-policy", status.HTTP_301_MOVED_PERMANENTLY)
 #endregion
 
 def main():
