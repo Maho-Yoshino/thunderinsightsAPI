@@ -1,5 +1,6 @@
 from asyncio import Task, Lock, CancelledError
 from logging import getLogger, Logger
+from aiohttp.client_exceptions import ClientResponseError
 from utils.network import NetworkManager, WebsocketManager
 from datetime import datetime, time, UTC
 from asyncio import sleep
@@ -109,6 +110,8 @@ class NewsEntry:
 				return self.ImportanceLevel.MINOR
 			return self.ImportanceLevel.REGULAR
 
+_changelog_maintenance: bool = False
+_news_endpoint_down: bool = False
 class NewsManager:
 	_API_URL = "http://newslist.gaijin.net:8080/news/warthunder/en/js"
 	_CHANGELOG_URL = "https://warthunder.com/en/game/changelog/"
@@ -212,52 +215,73 @@ class NewsManager:
 
 	async def fetchNews(self) -> list[NewsEntry]:
 		"""Gets all the latest news"""
+		global _news_endpoint_down
 		news:list[NewsEntry] = []
-		async with self._networkManager.get(self._API_URL) as response:
-			data = await response.json()
-			for item in data["items"]:
-				news.append(NewsEntry.from_json(item))
-		return news
+		try:
+			async with self._networkManager.get(self._API_URL) as response:
+				if _news_endpoint_down:
+					self._logger.info("Gaijin's news endpoint is back online")
+					_news_endpoint_down = False
+				data = await response.json()
+				for item in data["items"]:
+					news.append(NewsEntry.from_json(item))
+			return news
+		except ClientResponseError:
+			if not _news_endpoint_down:
+				self._logger.error("Gaijin's news endpoint is currently down. Returning emptry until it is back")
+				_news_endpoint_down = True
 	async def fetchChangelogs(self) -> list[NewsEntry]:
 		"""Gets the latest changelog"""
+		global _changelog_maintenance
 		final_changelogs = []
-		async with self._networkManager.get(self._CHANGELOG_URL) as resp:
-			parsed = BeautifulSoup(await resp.text(), 'html.parser')
-			changelogs = parsed.select("div.showcase__content-wrapper>div.showcase__item.widget")
-			if len(changelogs) < 2:
-				raise RuntimeError("An error occured when parsing changelogs")
-			async def processChangelog(chlog:Tag) -> NewsEntry:
-				ChLogURL:str = chlog.select_one("a.widget__link")["href"]
-				content = chlog.select_one("div.widget__content")
-				title = content.select_one("div.widget__title").get_text(strip=True)
-				anons = content.select_one("div.widget__comment").get_text(strip=True)
-				datetext = content.select_one("ul.widget__meta.widget-meta").select_one("li.widget-meta__item.widget-meta__item--right").get_text(strip=True)
-				date = datetime.strptime(datetext, "%d %B %Y").replace(tzinfo=UTC).strftime("%Y-%m-%dT%H:%M:%S%z")
-				del datetext
-				src = chlog.select_one("div.widget__poster>img").attrs["data-src"]
-				pinned = chlog.select_one("div.widget__pin") is not None
-				return NewsEntry.from_json({
-					"id":int(ChLogURL.split("/")[-1]),
-					"anons":anons,
-					"title":title,
-					"link":f"https://warthunder.com{ChLogURL}",
-					"tags":["Update"],
-					"images":[{
-						"src":src,
-			   			"width": 0,
-			   			"height": 0
-					}],
-					"type":"Changelog",
-					"created":date,
-					"pinned": pinned
-				})
-			for chlog in changelogs:
-				final_changelogs.append(await processChangelog(chlog))
-		return final_changelogs
+		try:
+			async with self._networkManager.get(self._CHANGELOG_URL) as resp:
+				if _changelog_maintenance:
+					self._logger.info("Changelog page is no longer under maintenance")
+					_changelog_maintenance = False
 
+				parsed = BeautifulSoup(await resp.text(), 'html.parser')
+				changelogs = parsed.select("div.showcase__content-wrapper>div.showcase__item.widget")
+				if len(changelogs) < 2:
+					raise RuntimeError("An error occured when parsing changelogs")
+				async def processChangelog(chlog:Tag) -> NewsEntry:
+					ChLogURL:str = chlog.select_one("a.widget__link")["href"]
+					content = chlog.select_one("div.widget__content")
+					title = content.select_one("div.widget__title").get_text(strip=True)
+					anons = content.select_one("div.widget__comment").get_text(strip=True)
+					datetext = content.select_one("ul.widget__meta.widget-meta").select_one("li.widget-meta__item.widget-meta__item--right").get_text(strip=True)
+					date = datetime.strptime(datetext, "%d %B %Y").replace(tzinfo=UTC).strftime("%Y-%m-%dT%H:%M:%S%z")
+					del datetext
+					src = chlog.select_one("div.widget__poster>img").attrs["data-src"]
+					pinned = chlog.select_one("div.widget__pin") is not None
+					return NewsEntry.from_json({
+						"id":int(ChLogURL.split("/")[-1]),
+						"anons":anons,
+						"title":title,
+						"link":f"https://warthunder.com{ChLogURL}",
+						"tags":["Update"],
+						"images":[{
+							"src":src,
+							"width": 0,
+							"height": 0
+						}],
+						"type":"Changelog",
+						"created":date,
+						"pinned": pinned
+					})
+				for chlog in changelogs:
+					final_changelogs.append(await processChangelog(chlog))
+			return final_changelogs
+		except ClientResponseError:
+			if not _changelog_maintenance:
+				self._logger.error("Changelogs page is under maintenance, returning empty until maintenance is over")
+				_changelog_maintenance = True
+				return []
 	async def _get_major_changelog(self, changelogs:list[NewsEntry]) -> None|NewsEntry:
 		"""Returns `None` if no new major update changelog has been posted"""
 		# i[0] is the pinned major update changelog
+		if not changelogs: 
+			return None
 		majorChLog = changelogs[0]
 		if majorChLog.id != self.lastMajorChLog:
 			await self._writeID(majorChLog.id, self._IDTYPE.MAJOR_CHLOG)
@@ -266,6 +290,8 @@ class NewsManager:
 
 	async def _get_new_changelogs(self, changelogs:list[NewsEntry]):
 		# i[1:] is the latest actual changelogs
+		if not changelogs:
+			return []
 		changelogs = changelogs[1:]
 
 		for i, item in enumerate(changelogs):
