@@ -1,7 +1,6 @@
-from enum import IntEnum, Enum, StrEnum, auto
+from enum import IntEnum, Enum, auto
 from re import search as re_search
-from fastapi import HTTPException
-from typing import Any
+from fastapi import HTTPException, status
 
 class ServerPool(IntEnum):
 	CHAR = 0
@@ -122,27 +121,27 @@ class GaijinErrorCodes(Enum): # TODO: Finish documenting gaijin error codes
 	"""Enum for Gaijin's error codes."""
 	# HTTP code, error details
 	CLAN_NOT_MEMBER = {
-		"code": 403, 
+		"code": status.HTTP_403_FORBIDDEN, 
 		"detail":"You are not a member of the given clan"
 	} 
 	CLAN_CANDIDATE_TIMEOUT = {
-		"code": 400, 
+		"code": status.HTTP_400_BAD_REQUEST, 
 		"detail":"You are already a candidate for this clan"
 	}
 	CLAN_YOU_HAVE_NO_RIGHT = {
-		"code": 403,
+		"code": status.HTTP_403_FORBIDDEN,
 		"detail": "You do not have permission to do this action"
 	}
 	CLAN_USER_IS_NOT_CANDIDATE = {
-		"code": 404,
+		"code": status.HTTP_404_NOT_FOUND,
 		"detail": "The given user is not an applicant"
 	}
 	DECLINE_TO_CREATE_NEW_PROFILE = {
-		"code": 403,
+		"code": status.HTTP_403_FORBIDDEN,
 		"detail": "User doesn't exist"
 	}
 	CLAN_IS_NOT_EXISTS = {
-		"code": 404,
+		"code": status.HTTP_404_NOT_FOUND,
 		"detail": "Searched clan doesn't exist"
 	}
 	@staticmethod
@@ -160,4 +159,4 @@ class GaijinErrorCodes(Enum): # TODO: Finish documenting gaijin error codes
 				detail=err.value["detail"]
 			)
 		except ValueError:
-			raise HTTPException(500, detail=code)
+			raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=code)

@@ -9,7 +9,7 @@ from aiosqlite import connect, Row, OperationalError
 from os import getenv, urandom
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from hashlib import sha256
 from secrets import token_urlsafe
 from pathlib import Path
@@ -25,12 +25,6 @@ from utils.network import NetworkManager
 
 _logger = getLogger(__name__)
 
-refreshIfLessMinutes = 30
-if refreshIfLessMinutes > 60:
-	raise AssertionError("The env variable REFRESH_IF_LESS_MINS cannot exceed 60 minutes")
-if refreshIfLessMinutes <= 0:
-	_logger.warning("The env variable REFRESH_IF_LESS_MINS is set to below 1, meaning it will basically never autorefresh the token")
-
 class TwoFactorRequired(AuthenticationError):
 	def __init__(self, types: set[str], request_id: str, user_id: int):
 		_ = {
@@ -40,7 +34,7 @@ class TwoFactorRequired(AuthenticationError):
 			"requestId": request_id,
 			"userId": user_id
 		}
-		super().__init__(403, _)
+		super().__init__(status.HTTP_403_FORBIDDEN, _)
 
 @dataclass(frozen=True, slots=True)
 class jwtData:
@@ -126,7 +120,7 @@ class UserTokenCache:
 						row[dbSchema.sso_sessions.SID],
 						datetime.fromtimestamp(row[dbSchema.sso_sessions.SID_EXP], UTC)
 					)
-				except (KeyError, TypeError):
+				except (IndexError, TypeError):
 					return
 			def to_json(self):
 				return asdict(self)
@@ -161,7 +155,7 @@ class UserTokenCache:
 				row = await cur.execute(f"""
 				SELECT * 
 				FROM {dbSchema.tokens.t()} LEFT JOIN {dbSchema.sso_sessions.t()} ON ({dbSchema.tokens.q(dbSchema.tokens.EMAIL)} = {dbSchema.sso_sessions.q(dbSchema.sso_sessions.EMAIL)}) 
-				WHERE {dbSchema.tokens.HASH} = ? AND {dbSchema.tokens.JWT_EXPIRES} > strftime('%s', 'now', '+5 minutes')""", (email,))
+				WHERE {dbSchema.tokens.EMAIL} = ? AND {dbSchema.tokens.JWT_EXPIRES} > strftime('%s', 'now', '+5 minutes')""", (email,))
 				row = await row.fetchone()
 				if row is None:
 					return None
@@ -190,7 +184,7 @@ class UserTokenCache:
 
 		async def refresh(self):
 			if datetime.now(UTC) > self.jwt_expires:
-				raise AuthenticationError(401, "Login expired. Please reauthenticate.")
+				raise AuthenticationError(status.HTTP_401_UNAUTHORIZED, "Login expired. Please reauthenticate.")
 
 			async with self._parent.__networkManager.operation() as session:
 				async with session.post(
@@ -205,11 +199,11 @@ class UserTokenCache:
 
 			if content.get("status") == "LOGINERROR":
 				if content.get("error") == "Wrong token":
-					self.expires = datetime.now(UTC)
+					self.jwt_expires = datetime.now(UTC)
 					return
-				raise AuthenticationError(400, f"An error occurred during authentication: {content}")
+				raise AuthenticationError(status.HTTP_400_BAD_REQUEST, f"An error occurred during authentication: {content}")
 
-			if self.jwt_expires != content["jwt"]:
+			if self.jwt != content["jwt"]:
 				self.jwt = content["jwt"]
 				self.jwt_expires = jwt_get_data(self.jwt).exp
 			await self._write_values()
@@ -218,7 +212,7 @@ class UserTokenCache:
 			return self.jwt_expires - datetime.now(UTC)
 		def usedWithin(self, minutes:int) -> bool:
 			return self.last_used > (datetime.now(UTC) - timedelta(minutes=minutes)) 
-		async def getSquadronId(self, throwOnNone:bool = True) -> int|None:
+		async def getSquadronId(self) -> int|None:
 			from tools import Request
 			userEntry = (await Request.send_template(
 				self,
@@ -227,11 +221,9 @@ class UserTokenCache:
 			)).get(str(self.uidHint))
 
 			if userEntry is None:
-				raise HTTPException(404, "User not found")
+				raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
 				
 			if userEntry.get("clanName") is None:
-				if throwOnNone:
-					raise HTTPException(401, "User is not part of a squadron")
 				return None
 
 			squadronData = await Request.send_template(
@@ -249,8 +241,6 @@ class UserTokenCache:
 				for member in squadron["members"]:
 					if int(member["uid"]) == self.uidHint:
 						return int(squadron["_id"])
-			if throwOnNone:
-				raise HTTPException(401, "User is not part of a squadron")
 			return None
 
 		async def _write_values(self):
@@ -271,20 +261,18 @@ class UserTokenCache:
 				elif isinstance(value, datetime):
 					value = dtToTimestamp(value)
 				changed[key] = value
-			
-			if not changed: # No point running query, no changes made
-				return
 
 			async with self._parent._transaction() as cur:
-				await cur.execute(f"""
-					UPDATE {dbSchema.tokens.t()} 
-					SET {", ".join([f"{k} = ?" for k in changed.keys()])}
-					WHERE {dbSchema.tokens.HASH} = ?
-				""",
-				(
-					*changed.values(),
-					self.__saved[dbSchema.tokens.HASH]
-				))
+				if changed:
+					await cur.execute(f"""
+						UPDATE {dbSchema.tokens.t()} 
+						SET {", ".join([f"{k} = ?" for k in changed.keys()])}
+						WHERE {dbSchema.tokens.HASH} = ?
+					""",
+					(
+						*changed.values(),
+						self.__saved[dbSchema.tokens.HASH]
+					))
 				if sso_changed:
 					await cur.execute(f"""
 						UPDATE {dbSchema.sso_sessions.t()} 
@@ -321,14 +309,14 @@ class UserTokenCache:
 	
 	__autorefresh_job:Job = None
 	__db_path:Path = None
-	__pending_2fa:dict[str, dict[str, int|str|list[str]]] # email -> {requestId, userId, types, code (after answering)}
+	_pending_2fa:dict[str, dict[str, int|str|list[str]]] # email -> {requestId, userId, types, code (after answering)}
 	__networkManager:NetworkManager
 
 	def __init__(self, networkManager:NetworkManager):
 		self.__networkManager = networkManager
 		self.scheduler = AsyncIOScheduler()
 
-		self.__pending_2fa = {}
+		self._pending_2fa = {}
 		self.__db_path = Path(__file__).parent / "users.db"
 
 		_logger.debug("User Token Cache initialized")
@@ -364,10 +352,11 @@ class UserTokenCache:
 				if data.get("hasGjPass"): two_factor_types.add("GaijinPass")
 				if data.get("hasTwoStepEmail"): two_factor_types.add("Email")
 				if data.get("hasWTR"): two_factor_types.add("WTR")
-				self.__pending_2fa[email] = {
+				self._pending_2fa[email] = {
 					"requestId": data['requestId'],
 					"userId": data["user_id"],
-					"types": two_factor_types 
+					"types": two_factor_types,
+					"expires": int((datetime.now(UTC) + timedelta(minutes=15)).timestamp())
 				}
 
 				tries = 0
@@ -391,18 +380,18 @@ class UserTokenCache:
 								tries += 1
 								continue
 						else: # UNTESTED PATH
-							if self.__pending_2fa[email].get("code") is None:
+							if self._pending_2fa[email].get("code") is None:
 								tries += 1
 								await sleep(60)
 								continue
 							data = {
-								"Message": self.__pending_2fa[email]["code"],
-								"Request": self.__pending_2fa[email]["requestId"]
+								"Message": self._pending_2fa[email]["code"],
+								"Request": self._pending_2fa[email]["requestId"]
 							}
 							success = True
 
 				if not success:
-					raise AuthenticationError(403, "Could not get 2FA login in time")
+					raise AuthenticationError(status.HTTP_403_FORBIDDEN, "Could not get 2FA login in time")
 
 				async with session.post(
 					"https://auth.gaijinent.com/login.php",
@@ -422,11 +411,11 @@ class UserTokenCache:
 					data = await self.__networkManager.handle_response(r)
 
 				if data["status"] == "2STEPERROR":
-					self.__pending_2fa.pop(email, None)
-					raise AuthenticationError(403, "Invalid 2FA code provided.")
+					self._pending_2fa.pop(email, None)
+					raise AuthenticationError(status.HTTP_403_FORBIDDEN, "Invalid 2FA code provided.")
 
 			if data["status"] == "LOGINERROR":
-				raise HTTPException(400, f"Login failed: {data["error"]}")
+				raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Login failed: {data["error"]}")
 			#endregion
 
 		async with self._transaction() as cur:
@@ -559,31 +548,37 @@ class UserTokenCache:
 		if sid is not None:
 			expiry = datetime.now(UTC)+timedelta(days=14)
 			entry.sid = entry.sid_entry(sid, expiry)
-			entry._write_values()
+			await entry._write_values()
 
 			return _sidValue(
 				sid, 
 				expiry
 			) 
+
+	async def remove_entry(self, entry: Entry) -> bool:
+		async with self._transaction() as cur:
+			await cur.execute(f"DELETE FROM {dbSchema.sso_sessions.t()} WHERE {dbSchema.sso_sessions.EMAIL} = ?", (entry.email,))
+			await cur.execute(f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.USER_TOKEN} = ?", (entry.user_token,))
+			return await (await cur.execute(f"SELECT 1 FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.USER_TOKEN} = ?", (entry.user_token,))).fetchone() is None
 	# region Helpers
 	async def _refresh(self):
-		self.__pending_2fa = {k:v for k,v in self.__pending_2fa.items() if v["expires"] > round(datetime.now(UTC).timestamp(), 0)}
-		schema = dbSchema
+		self._pending_2fa = {k:v for k,v in self._pending_2fa.items() if v["expires"] > round(datetime.now(UTC).timestamp(), 0)}
 		async with self._transaction() as cur:
-			rows = await (await cur.execute(f"SELECT * FROM {schema.tokens.t()} WHERE {schema.tokens.JWT_EXPIRES} > strftime('%s', 'now')")).fetchall()
-		for row in rows:
-			entry = await self.Entry.from_row(self, row)
-			try:
-				if entry.usedWithin(30):
-					await entry.refresh()
-			except AuthenticationError:
-				await cur.execute(
-					f"DELETE FROM {schema.tokens.t()} WHERE {schema.tokens.HASH} = ?", 
-					(entry.hashed,)
-				)
-				_logger.info(f"Removed expired entry for {entry.email}")
-		async with self._transaction() as cur:
-			operation = await cur.execute(f"DELETE FROM {schema.tokens.t()} WHERE {schema.tokens.JWT_EXPIRES} <= strftime('%s', 'now')")
+			rows = await (await cur.execute(f"SELECT * FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.JWT_EXPIRES} > strftime('%s', 'now')")).fetchall()
+
+			for row in rows:
+				entry = await self.Entry.from_row(self, row)
+				try:
+					if entry.usedWithin(30):
+						await entry.refresh()
+				except AuthenticationError:
+					await cur.execute(
+						f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.HASH} = ?", 
+						(entry.hashed,)
+					)
+					_logger.info(f"Removed expired entry for {entry.email}")
+
+			operation = await cur.execute(f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.JWT_EXPIRES} <= strftime('%s', 'now')")
 			if operation.rowcount > 0:
 				_logger.info(f"Deleted {operation.rowcount} expired entries")	
 		

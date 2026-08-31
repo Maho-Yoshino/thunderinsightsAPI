@@ -1,17 +1,17 @@
 from os import getenv
 from typing_extensions import Annotated
-from fastapi import APIRouter, Form, HTTPException, Request, Depends
+from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from utils import users_cache
 from pydantic import EmailStr
-from utils.auth import UserTokenCache
-from api.models import Authentication
-from api.shared import limiter, get_auth
+
+from utils import users_cache
 from utils.helper import dtToTimestamp
+from api.models.auth import Login, LoginToken
+from api.shared import limiter, TokenBearer
 
 router = APIRouter(
 	tags=["authentication"],
-	responses={404: {"description": "Not found"}}
+	responses={status.HTTP_404_NOT_FOUND: {"description": "Not found"}}
 )
 
 @router.post(
@@ -19,9 +19,9 @@ router = APIRouter(
 	summary="Get a token to use in other endpoints", 
 	description="You can use this token for the endpoints. If given user has 2FA enabled, they must provide the 2FA code along with their credentials through either `Gaijin pass` or the `/v1/answer-2fa` endpoint. If you generated a token that hasn't expired yet, the endpoint will just give back the cached token.",
 	responses={
-		200: {"model": Authentication.Login.LoginResponse},
-		403: {"model": Authentication.Login.Fail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."},
-		429: {"description": "Rate limit exceeded. Please wait a bit before trying again."},
+		status.HTTP_200_OK: {"model": Login.LoginResponse},
+		status.HTTP_403_FORBIDDEN: {"model": Login.Fail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."},
+		status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded. Please wait a bit before trying again."},
 	}
 )
 @limiter.limit(getenv("LOGIN_RATE_LIMIT", "5/minute"))
@@ -35,26 +35,26 @@ async def login_post(
 	return JSONResponse({
 		"status": "OK",
 		"token": token
-	}, status_code=200)
+	}, status_code=status.HTTP_200_OK)
 
 @router.post(
 	"/refresh-token", 
 	summary="Refresh your token so it stays alive for longer. This is essentially a 'No op', just to keep the token active.",
 	description="If you are cached it will refresh the token. The game generally refreshes the token every 30 minutes. Returns an UNIX timestamp of the new token expiry",
 	responses={
-		200: {"model": Authentication.LoginToken.LoginTokenResponse, "description": "Token refreshed successfully"},
-		404: {"model": Authentication.LoginToken.LoginFailResponse, "description": "Invalid token provided. The token is either expired or invalid."},
-		429: {"description": "Rate limit exceeded. Please wait a bit before trying again."}
+		status.HTTP_200_OK: {"model": LoginToken.LoginTokenResponse, "description": "Token refreshed successfully"},
+		status.HTTP_404_NOT_FOUND: {"model": LoginToken.LoginFailResponse, "description": "Invalid token provided. The token is either expired or invalid."},
+		status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded. Please wait a bit before trying again."}
 	}
 )
 @limiter.limit(getenv("LOGIN_RATE_LIMIT", "5/minute"))
 async def login_token(
 	request: Request, 
-    user: UserTokenCache.Entry = Depends(get_auth)
+	user: TokenBearer
 ):
 	await user.refresh()
 	return {
-		"expires": dtToTimestamp(user.expires),
+		"expires": dtToTimestamp(user.jwt_expires),
 		"status": "OK"
 	}
 
@@ -65,29 +65,43 @@ async def login_token(
 @limiter.limit(getenv("LOGIN_RATE_LIMIT", "5/minute"))
 async def answer_2fa(
 	request: Request,
-	email: EmailStr,
+	email: Annotated[EmailStr, Form(title="The email address for the account")],
 	code: Annotated[int, Form(title="The 2FA code")]
 ):
-	if email not in users_cache:
-		raise HTTPException(401, "You are not pending 2FA verification. Please try to log in first.")
-	users_cache.__pending_2fa[email]["code"] = code
+	if email not in users_cache._pending_2fa:
+		raise HTTPException(status.HTTP_404_NOT_FOUND, "You are not pending 2FA verification. Please try to log in first.")
+	users_cache._pending_2fa[email]["code"] = code
 	... # TODO: Implement
 
 @router.post(
 	"/get-sid",
 	summary="Gets an 'identifier_sid' value, used for replay searching. Value is not displayed, but will be used in the requests that require it. Has to be refreshed every 14 days",
 	responses={
-		200: {},
-		400: {"description": "Generic fetch failure"},
-		404: {"description": "User not found in database"}
+		status.HTTP_200_OK: {},
+		status.HTTP_400_BAD_REQUEST: {"description": "Generic fetch failure"},
+		status.HTTP_404_NOT_FOUND: {"description": "User not found in database"}
 	}
 )
+@limiter.limit(getenv("LOGIN_RATE_LIMIT", "5/minute"))
 async def get_sid(
 	request: Request,
-	password: Annotated[str, Form(min_length=6, max_length=64, json_schema_extra={"format": "password"}, description="Must be given, as we do not store passwords")],
-    user: UserTokenCache.Entry = Depends(get_auth)
+	user: TokenBearer,
+	password: Annotated[str, Form(min_length=6, max_length=64, json_schema_extra={"format": "password"}, description="Must be given, as we do not store passwords")]
 ):
-	sid = await users_cache.get_sid(user.email, password)
+	sid = await users_cache.get_sid(user, password)
 	if sid == None:
-		raise HTTPException(500, "Could not obtain sid value")
-	return JSONResponse({"status": "success"}, 200)
+		raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Could not obtain sid value")
+	return JSONResponse({"status": "success"}, status.HTTP_200_OK)
+
+@router.delete(
+	"/remove",
+	summary="Removes your login entry from our system"
+)
+@limiter.limit(getenv("LOGIN_RATE_LIMIT", "5/minute"))
+async def remove_login(
+	request: Request,
+	user: TokenBearer
+):
+	if (await users_cache.remove_entry(user)):
+		return JSONResponse({"success": True})
+	raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "An error occurred during login deletion")

@@ -1,6 +1,6 @@
 from utils.replayParser.parser import ReplayParser
 from utils import networkManager
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from asyncio import sleep
 
 difficultyDict = {
@@ -43,7 +43,7 @@ class Replay(dict):
 							break
 
 						if r.status >= 400:
-							raise HTTPException(500, detail="Replay server gave an error")
+							raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Replay server gave an error")
 
 						wrpl_num += 1
 				while True:
@@ -57,7 +57,7 @@ class Replay(dict):
 							continue
 
 						if r.status >= 400:
-							raise HTTPException(500, detail="Replay server gave an error")
+							raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Replay server gave an error")
 
 						data = await r.read()
 						return ReplayParser(data)

@@ -1,5 +1,5 @@
 from typing import Any, TYPE_CHECKING
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from logging import getLogger
 from aiohttp import ClientResponse, ClientSession
 from requests import get as req_get
@@ -82,14 +82,15 @@ class Request:
 		if headers:
 			self.headers.update(headers)
 
+
 		if host is not None:
 			self.url = host
 		else:
-			self.url = get_server(self.action)
+			self.url = get_server(action)
 
-		if action is None and host is None:
-			raise RuntimeError("No action provided")
 		self.action = action
+		if self.action is None and self.url is None:
+			raise RuntimeError("No action and no URL provided")
 
 		self.method = method
 		self.user = user
@@ -145,7 +146,7 @@ class Request:
 		if authTimeLeft <= timedelta(minutes=30):
 			await self.user.refresh()
 		elif authTimeLeft < timedelta():
-			raise AuthenticationError(401, "Your login has expired, please log in again to reauthenticate.")
+			raise AuthenticationError(status.HTTP_401_UNAUTHORIZED, "Your login has expired, please log in again to reauthenticate.")
 		if self.user.jwt:
 			if "Authorization" in self.body:
 				self.body["Authorization"] = f"Bearer {self.user.jwt}"
@@ -161,22 +162,22 @@ class Request:
 				self.headers["transactid"] = str(randint(0, 999999999999))
 			return
 		else:
-			raise AuthenticationError(403, "Authentication required for this request, but no token is available. Please ensure you have logged in successfully.")
+			raise AuthenticationError(status.HTTP_403_FORBIDDEN, "Authentication required for this request, but no token is available. Please ensure you have logged in successfully.")
 
 	async def send(self) -> dict[str, Any]:
 		if self.action is None and self.url is None: return
 		kwargs: dict[str, Any] = {"headers": self.headers}
 		for key, value in self.body.items():
 			if value == "<replace>":
-				raise HTTPException(500, f"[{self.action.name}] Body value `{key}` is not replaced by code")
+				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Body value `{key}` is not replaced by code")
 			elif key == "<replace>":
-				raise HTTPException(500, f"[{self.action.name}] Body key with value `{value}` is not replaced by code")
+				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Body key with value `{value}` is not replaced by code")
 
 		for header, value in kwargs["headers"].items():
 			if value == "<replace>":
-				raise HTTPException(500, f"[{self.action.name}] Header value `{header}` is not replaced by code")
+				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Header value `{header}` is not replaced by code")
 			elif header == "<replace>": 
-				raise HTTPException(500, f"[{self.action.name}] Header key with value `{value}` is not replaced by code")
+				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Header key with value `{value}` is not replaced by code")
 			if isinstance(value, (bytes, str)):
 				continue
 			elif isinstance(value, dict):
@@ -186,7 +187,7 @@ class Request:
 			else:
 				kwargs["headers"][header] = str(value)
 
-		match self.headers["Content-Type"]:
+		match self.headers.get("Content-Type"):
 			case "application/x-www-form-urlencoded":
 				if self.action == UserAction.market_view_item:
 					kwargs["data"] = dumps(self.body)
@@ -196,8 +197,11 @@ class Request:
 				kwargs["data"] = Compress(self.body, self.headers.get("compr"))
 			case "application/json":
 				kwargs["json"] = self.body
+			case None:
+				pass
 			case _:
 				raise NotImplementedError(f"Content-Type value '{self.headers["Content-Type"]}' not implemented")
+					
 
 		if self.session is None:
 			async with networkManager.request(self.method.upper(), self.url, **kwargs) as resp:
@@ -221,5 +225,5 @@ class Request:
 			}
 		try:
 			return loads(content)
-		except JSONDecodeError:
+		except (JSONDecodeError, UnicodeDecodeError):
 			return Decompress(content).as_dict()

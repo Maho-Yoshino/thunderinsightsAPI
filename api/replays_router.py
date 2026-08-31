@@ -1,29 +1,31 @@
 from os import getenv
 from typing_extensions import Annotated
-from fastapi import APIRouter, Path, Request as faRequest, Depends, Query
+from fastapi import APIRouter, Path, Request as faRequest, Query, status
+
 from utils.replayParser import Replay
-from utils.auth import UserTokenCache
-from api.backends.replay import *
-from api.models import Replays
-from api.shared import limiter, get_auth
+from api.backends.replay import search_replay, ReplayType, ReplayMode, ReplayTechType
+from api.models.replay import SearchModel, DataModel, ReplayNotFoundModel
+from api.shared import limiter, TokenBearer
+
 
 router = APIRouter(
-    prefix="/replay",
+	prefix="/replay",
 	tags=["replays"],
-	responses={404: {"description": "Not found"}}
+	responses={status.HTTP_404_NOT_FOUND: {"description": "Not found"}}
 )
 
 @router.get(
 	"/search",
 	summary="Searches for replays based on given parameters",
 	responses={
-		200: {"model": Replays.SearchModel},
-		401: {"description": "The token has no associated `identity_sid` value associated, required for replay lookup. Get one from `/v1/get-sid`"},
+		status.HTTP_200_OK: {"model": SearchModel},
+		status.HTTP_401_UNAUTHORIZED: {"description": "The token has no associated `identity_sid` value associated, required for replay lookup. Get one from `/v1/get-sid`"},
 	}
 )
 @limiter.shared_limit("replays", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def search_replays(
 	request: faRequest,
+	user: TokenBearer,
 	uid: Annotated[
 		int, 
 		Query(title="The UID of the user to search replays for")
@@ -72,7 +74,6 @@ async def search_replays(
 			ge=0
 		)
 	] = 0,
-    user: UserTokenCache.Entry = Depends(get_auth)
 ):
 	return await search_replay(user, uid, nickname, gameType, techType, mode, limit, page)
 
@@ -80,12 +81,13 @@ async def search_replays(
 	"/{replayId}", 
 	summary="Gets data from a specified replay",
 	responses={
-		200: {"model": Replays.DataModel},
-		404: {"model": Replays.ReplayNotFoundModel, "description": "Replay not found"}
+		status.HTTP_200_OK: {"model": DataModel},
+		status.HTTP_404_NOT_FOUND: {"model": ReplayNotFoundModel, "description": "Replay not found"}
 	})
 @limiter.shared_limit("replays", getenv("REGULAR_RATE_LIMIT", "30/minute"))
 async def get_replay(
 	request: faRequest,
+	user: TokenBearer,
 	replayId: Annotated[
 		str, 
 		Path(
@@ -94,6 +96,5 @@ async def get_replay(
 			description="Must be given in HEX format"
 		),
 	],
-    user: UserTokenCache.Entry = Depends(get_auth)
 ):
 	return await Replay.get(replayId)

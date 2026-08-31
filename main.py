@@ -4,7 +4,7 @@ if not load_dotenv(".env"):
 
 import logging, asyncio
 from logging.handlers import TimedRotatingFileHandler
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
@@ -87,7 +87,7 @@ app.add_exception_handler(
 	RateLimitExceeded, 
 	lambda request, exc: (
 		logging.warning(f"Rate limit exceeded for {request.client.host}"), 
-		JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
+		JSONResponse({"detail": "Rate limit exceeded"}, status_code=status.HTTP_429_TOO_MANY_REQUESTS)
 	)[1]
 )
 #endregion
@@ -135,7 +135,6 @@ def main():
 	logFolder = Path(__file__).parent / "logs"
 	logFolder.mkdir(mode=0o755, exist_ok=True)
 
-	logger = logging.getLogger()
 	handler = TimedRotatingFileHandler(logFolder / "latest.log", when="midnight", interval=1, utc=True, backupCount=5)
 	handler.suffix = "%Y-%m-%d"
 	formatter = logging.Formatter(f"%(asctime)s:%(name)-30s:%(funcName)-15s:%(lineno)-3d:%(levelname)-7s:%(message)s", datefmt="%Y-%m-%d %H:%M:%S")

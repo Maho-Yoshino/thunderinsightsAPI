@@ -7,6 +7,7 @@
     },
     "body": {
         "_id": "<replace>",
-        "count": 10
+        "count": 10,
+        "events": "create;info"
     }
 }

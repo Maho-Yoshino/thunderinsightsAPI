@@ -90,7 +90,7 @@ class Decompress(dict):
 		payload = decompressed or data
 		unpacked = run_process(
 			[str(wt_ext_cli), 'unpack_raw_blk', '--stdin', '--stdout', '--format', 'Json'],
-			input=payload, shell=True, capture_output=True
+			input=payload, capture_output=True
 		)
 		super().__init__(loads(unpacked.stdout))
 
@@ -119,7 +119,7 @@ class Decompress(dict):
 				_logger.debug(f"Trying LZ4 {label}; potential uncompressed size: {uncompressed_size}")
 				return lz4decompress(compressed_payload, uncompressed_size=uncompressed_size)
 			except Exception as e:
-				_logger.error(f"LZ4 {label} decompression failed: {e}")
+				_logger.debug(f"LZ4 {label} decompression failed: {e}")
 
 		return None
 
@@ -154,14 +154,12 @@ class Compress(bytes):
 					return Compress.Algorithm.BZIP
 				case _:
 					raise NotImplementedError(f"Compression algorithm '{text}' is not implemented")
-	def __init__(self, data: dict, algo: Algorithm|str|None = Algorithm.NONE):
+	def __new__(cls, data: dict, algo: Algorithm|str|None = Algorithm.NONE):
 		if isinstance(algo, str):
-			algo = self.Algorithm.from_str(algo)
+			algo = cls.Algorithm.from_str(algo)
 		elif algo is None:
-			algo = self.Algorithm.NONE
-
-		super().__init__()
-		self = self.convert(data, algo)
+			algo = cls.Algorithm.NONE
+		return bytes.__new__(cls, cls.convert(data, algo))
 
 	def as_bytes(self):
 		return bytes(self)
@@ -201,7 +199,7 @@ class Compress(bytes):
 			else:
 				_logger.warning(f'Skipping key "{key}" with unsupported type {type(value).__name__}')
 
-		blkx_text = bytes('\n'.join(lines) + '\n')
+		blkx_text = ('\n'.join(lines) + '\n').encode("utf-8")
 
 		result = run_process(
 			[str(binBlk), '-', '-', '-b'],

@@ -12,20 +12,20 @@ TEMPLATES: list[str] = _tpls
 _cache: dict[str, dict] = {}
 
 def load(action: str) -> dict:
-    if action in _cache:
-        return _cache[action]
-    path = __root / f"{action}.json"
-    if not path.is_file():
-        raise FileNotFoundError(f"Unknown template '{action}'. Available: {TEMPLATES}")
-    with open(path) as f:
-        data = _load(f)
-    _cache[action] = data
-    return data
+	if action in _cache:
+		return _cache[action]
+	path = __root / f"{action}.json"
+	if not path.is_file():
+		raise FileNotFoundError(f"Unknown template '{action}'. Available: {TEMPLATES}")
+	with open(path) as f:
+		data = _load(f)
+	_cache[action] = data
+	return data
 
 def reload() -> None:
-    _cache.clear()
+	_cache.clear()
 
 if __name__ == "__main__":
-    print("Available:", TEMPLATES)
-    if TEMPLATES:
-        print(f"\nLiteral for action parameter:\n    Literal[{', '.join(repr(t) for t in TEMPLATES)}]")
+	print("Available:", TEMPLATES)
+	if TEMPLATES:
+		print(f"\nLiteral for action parameter:\n    Literal[{', '.join(repr(t) for t in TEMPLATES)}]")
