@@ -63,8 +63,7 @@ async def get_applicants(
 		if geodata:
 			newdata["geodata"] = {
 				"country": geodata.country.iso_code,
-				"timezone": lookup_utc_offset(geodata.location.time_zone),
-				"city": geodata.city.name
+				"timezone": lookup_utc_offset(geodata.location.time_zone)
 			}
 		return [newdata,]
 	for entry in clanData.get("candidates"):
@@ -79,8 +78,7 @@ async def get_applicants(
 		if geodata:
 			newdata["geodata"] = {
 				"country": geodata.country.iso_code,
-				"timezone": lookup_utc_offset(geodata.location.time_zone),
-				"city": geodata.city.name
+				"timezone": lookup_utc_offset(geodata.location.time_zone)
 			}
 		data.append(newdata)
 	return data

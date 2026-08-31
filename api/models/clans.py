@@ -38,7 +38,6 @@ class ApplicantModel(BaseModel):
 	class GeolocationDataModel(BaseModel):
 		country: str
 		timezone: int
-		city: str
 	geodata:GeolocationDataModel = Field(default=None)
 
 class LogsModel(BaseModel):
