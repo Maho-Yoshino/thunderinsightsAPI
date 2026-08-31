@@ -6,12 +6,14 @@ import logging, asyncio
 from logging.handlers import TimedRotatingFileHandler
 from fastapi import FastAPI, status
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 from uvicorn import run as uvicorn_run
 from os import getenv, path
 from pathlib import Path
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, asdict
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -77,8 +79,9 @@ app = FastAPI(
 	description="API to retrieve War Thunder data.",
 	version="1.0.0",
 	openapi_tags=tags_metadata,
-	swagger_ui_parameters={"defaultModelsExpandDepth": -1},
-	lifespan=lifespan
+	lifespan=lifespan,
+	redoc_url=None,
+	docs_url=None
 )
 
 #region Rate Limiter
@@ -102,10 +105,26 @@ app.include_router(replays_router.router, prefix="/v1")
 app.include_router(marketplace_router.router, prefix="/v1")
 #endregion
 
-#region Remove 422 responses from OpenAPI schema
+#region Modify OpenAPI schema
+@dataclass(slots=True)
+class WebSocketInfo:
+	tags: list[str]
+	summary: str
+	description: str
+
+	def to_json(self):
+		return asdict(self)
+websockets: dict[str, WebSocketInfo] = {
+	"/v1/news_ws": WebSocketInfo(
+		tags = ["general"],
+		summary = "Live news feed",
+		description = "Sends the newest news article every time a new one is posted"
+	)
+}
 def custom_openapi():
-	if app.openapi_schema:
+	if app.openapi_schema: # If already modified
 		return app.openapi_schema
+
 	openapi_schema = get_openapi(
 		title=app.title,
 		version=app.version,
@@ -113,13 +132,55 @@ def custom_openapi():
 		routes=app.routes,
 		tags=app.openapi_tags,
 	)
+
 	for path in openapi_schema["paths"].values():
 		for method in path.values():
 			method["responses"].pop("422", None)
+
+	for route in app.routes:
+		ws_data = websockets.get(route.path)
+		if ws_data is None:
+			continue
+
+		openapi_schema["paths"].setdefault(route.path, {})
+		openapi_schema["paths"][route.path]["x-websocket"] = ws_data.to_json()
+
 	app.openapi_schema = openapi_schema
 	return app.openapi_schema
 
 app.openapi = custom_openapi
+#endregion
+
+#region Modify Documentation page
+swagger_docs = None
+@app.get("/docs", include_in_schema=False)
+@app.get("/", include_in_schema=False)
+def custom_swagger_ui():
+	global swagger_docs
+	if swagger_docs:
+		return HTMLResponse(swagger_docs)
+
+	page = get_swagger_ui_html(
+		openapi_url=app.openapi_url,
+		title=f"{app.title} - Swagger UI",
+		swagger_ui_parameters={"defaultModelsExpandDepth": -1},
+	)
+
+	html = page.body.decode("utf-8")
+
+	websocket_script = (Path(__file__).parent / "swagger_ui_modify.js").read_text()
+	html = html.replace("</body>", "<script>"+websocket_script+"</script></body>")
+
+	websocket_css = (Path(__file__).parent / "swagger_ui_modify.css").read_text()
+	html = html.replace("</head>", "<style>"+websocket_css+"</style></head>")
+
+	swagger_docs = html
+	return HTMLResponse(html)
+#endregion
+#region Privacy Policy
+@app.get("/privacy")
+def privacy_policy():
+	return RedirectResponse("https://github.com/Order-Of-The-Birb/ThunderAPI/README.md#privacy-policy")
 #endregion
 
 def main():
