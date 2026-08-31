@@ -1,8 +1,20 @@
-from dotenv import load_dotenv
-if not load_dotenv(".env"):
-	raise FileNotFoundError(".env file could not be loaded.")
-
 import logging, asyncio
+from dotenv import load_dotenv
+from pathlib import Path
+
+logger = logging.getLogger()
+
+if not load_dotenv(".env"):
+	logger.warning(".env not found, copying .example.env")
+	example_env = (Path(__file__).parent / ".example.env")
+	dotenv = Path(__file__).parent / ".env"
+	example_env.copy(dotenv)
+	if not load_dotenv(".env"):
+		raise RuntimeError("Could not load .env data")
+	dotenv.chmod(0o600)
+else:
+	(Path(__file__).parent / ".env").chmod(0o600)
+
 from logging.handlers import TimedRotatingFileHandler
 from fastapi import FastAPI, status
 from fastapi.openapi.utils import get_openapi
@@ -11,7 +23,6 @@ from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 from uvicorn import run as uvicorn_run
 from os import getenv, path
-from pathlib import Path
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, asdict
 
@@ -19,10 +30,10 @@ loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
 from utils import users_cache, networkManager, newsManager
+from utils.geo import update_db
 from api import users_router, clans_router, general_router, auth_router, units_router, replays_router, marketplace_router
 from api.shared import limiter
 
-logger = logging.getLogger()
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
@@ -62,13 +73,19 @@ async def lifespan(app: FastAPI):
 	await users_cache.start()
 	await networkManager.start()
 	newsManager.task = asyncio.create_task(newsManager.mainloop())
+	geolocation_task = asyncio.create_task(update_db())
 
 	try:
 		yield
 	finally:
 		newsManager.task.cancel()
+		geolocation_task.cancel()
 		try:
 			await newsManager.task
+		except asyncio.CancelledError:
+			pass
+		try:
+			await geolocation_task
 		except asyncio.CancelledError:
 			pass
 		await users_cache.close()
@@ -81,7 +98,10 @@ app = FastAPI(
 	openapi_tags=tags_metadata,
 	lifespan=lifespan,
 	redoc_url=None,
-	docs_url=None
+	docs_url=None,
+	responses={
+		status.HTTP_401_UNAUTHORIZED: {"description": "User token was not found, user is not authenticated or login expired"}
+	}
 )
 
 #region Rate Limiter

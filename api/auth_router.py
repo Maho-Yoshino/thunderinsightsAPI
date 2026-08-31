@@ -20,7 +20,8 @@ router = APIRouter(
 	description="You can use this token for the endpoints. If given user has 2FA enabled, they must provide the 2FA code along with their credentials through either `Gaijin pass` or the `/v1/answer-2fa` endpoint. If you generated a token that hasn't expired yet, the endpoint will just give back the cached token.",
 	responses={
 		status.HTTP_200_OK: {"model": Login.LoginResponse},
-		status.HTTP_403_FORBIDDEN: {"model": Login.Fail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."},
+		status.HTTP_401_UNAUTHORIZED: {"model": Login.Fail2FAResponse, "description": "Unauthorized. Account has 2FA enabled, and needs to go through the 2FA process."},
+		status.HTTP_408_REQUEST_TIMEOUT: {"description": "Account has Two Factor Authentication, and authentication timed out"},
 		status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded. Please wait a bit before trying again."},
 	}
 )

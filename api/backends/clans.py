@@ -3,7 +3,8 @@ from typing import Any
 
 from tools import Request
 from utils.auth import UserTokenCache
-from api.models.clans import ClanModel
+from utils.geo import lookup_city
+from api.models.clans import ClanModel, ApplicantModel
 
 async def searchClan(user: UserTokenCache.Entry, clanName: str | None = None, clanTag: str | None = None, limit: int = 10, page:int = 0) -> list[ClanModel]:
 	response = await Request.from_template(

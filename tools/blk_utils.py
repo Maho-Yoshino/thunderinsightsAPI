@@ -1,4 +1,5 @@
 import struct
+from asyncio import to_thread
 from logging import getLogger
 from os import getenv
 from shutil import which
@@ -90,9 +91,14 @@ class Decompress(dict):
 		payload = decompressed or data
 		unpacked = run_process(
 			[str(wt_ext_cli), 'unpack_raw_blk', '--stdin', '--stdout', '--format', 'Json'],
-			input=payload, capture_output=True
+			input=payload, 
+			capture_output=True,
+			timeout=60
 		)
 		super().__init__(loads(unpacked.stdout))
+	@classmethod
+	async def async_init(cls, data:bytes):
+		return await to_thread(cls, data)
 
 	@staticmethod
 	def lz4_decompress_try(data) -> None|bytes:
@@ -161,6 +167,10 @@ class Compress(bytes):
 			algo = cls.Algorithm.NONE
 		return bytes.__new__(cls, cls.convert(data, algo))
 
+	@classmethod
+	async def async_init(cls, data:dict, algo: Algorithm|str|None = Algorithm.NONE):
+		return await to_thread(cls, data, algo)
+
 	def as_bytes(self):
 		return bytes(self)
 
@@ -205,6 +215,7 @@ class Compress(bytes):
 			[str(binBlk), '-', '-', '-b'],
 			input=blkx_text,
 			capture_output=True,
+			timeout=60
 		)
 		if result.returncode != 0:
 			stderr_msg = result.stderr.decode('utf-8', errors='replace').strip()

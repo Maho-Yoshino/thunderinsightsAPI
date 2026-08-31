@@ -8,6 +8,7 @@ uvicorn
 apscheduler
 requests
 python-multipart
+PyGithub
 
 # Data processing
 lz4
@@ -15,6 +16,7 @@ bs4
 pandas
 PyJWT[crypto]
 pydantic[email]
+cryptography
 
 # Async
 aiosqlite

@@ -1,3 +1,4 @@
+from asyncio import to_thread
 from typing import Any, TYPE_CHECKING
 from fastapi import HTTPException, status
 from logging import getLogger
@@ -169,15 +170,27 @@ class Request:
 		kwargs: dict[str, Any] = {"headers": self.headers}
 		for key, value in self.body.items():
 			if value == "<replace>":
-				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Body value `{key}` is not replaced by code")
+				raise HTTPException(
+					status.HTTP_500_INTERNAL_SERVER_ERROR,
+					f"[{self.action.name}] Body value `{key}` is not replaced by code"
+				)
 			elif key == "<replace>":
-				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Body key with value `{value}` is not replaced by code")
+				raise HTTPException(
+					status.HTTP_500_INTERNAL_SERVER_ERROR,
+					f"[{self.action.name}] Body key with value `{value}` is not replaced by code"
+				)
 
 		for header, value in kwargs["headers"].items():
 			if value == "<replace>":
-				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Header value `{header}` is not replaced by code")
+				raise HTTPException(
+					status.HTTP_500_INTERNAL_SERVER_ERROR,
+					f"[{self.action.name}] Header value `{header}` is not replaced by code"
+				)
 			elif header == "<replace>": 
-				raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"[{self.action.name}] Header key with value `{value}` is not replaced by code")
+				raise HTTPException(
+					status.HTTP_500_INTERNAL_SERVER_ERROR,
+					f"[{self.action.name}] Header key with value `{value}` is not replaced by code"
+				)
 			if isinstance(value, (bytes, str)):
 				continue
 			elif isinstance(value, dict):
@@ -194,7 +207,7 @@ class Request:
 				else:
 					kwargs["data"] = self.body # TODO: New code
 			case "application/octet-stream":
-				kwargs["data"] = Compress(self.body, self.headers.get("compr"))
+				kwargs["data"] = await Compress.async_init(self.body, self.headers.get("compr"))
 			case "application/json":
 				kwargs["json"] = self.body
 			case None:
@@ -226,4 +239,4 @@ class Request:
 		try:
 			return loads(content)
 		except (JSONDecodeError, UnicodeDecodeError):
-			return Decompress(content).as_dict()
+			return (await Decompress.async_init(content)).as_dict()

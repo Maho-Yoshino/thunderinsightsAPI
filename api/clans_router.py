@@ -4,6 +4,7 @@ from fastapi import APIRouter, Path, Query, Form, HTTPException, Request as faRe
 from fastapi.responses import JSONResponse
 
 from tools import Request
+from utils.geo import lookup_city, lookup_utc_offset
 from api.shared import limiter, TokenBearer
 from api.models.clans import LogsModel, ClanModel, Roles, ApplicantModel, RolesDisplay, Actions, ClanPositionModel
 from api.models.base import SuccessEmptyDict
@@ -51,23 +52,37 @@ async def get_applicants(
 	if candidates is None:
 		return []
 	if isinstance(candidates, dict):
-		return [
-			ApplicantModel(
-				uid=candidates["uid"],
-				nickname=candidates["nick"],
-				timestamp=candidates["date"],
-				comment=candidates["comments"],
-				ip=candidates["ip"]
-			)
-		]
+		newdata = {
+			"uid": candidates["uid"],
+			"nickname": candidates["nick"],
+			"timestamp": candidates["date"],
+			"comment": candidates["comments"],				
+		}
+
+		geodata = lookup_city(candidates["ip"])
+		if geodata:
+			newdata["geodata"] = {
+				"country": geodata.country.iso_code,
+				"timezone": lookup_utc_offset(geodata.location.time_zone),
+				"city": geodata.city.name
+			}
+		return [newdata,]
 	for entry in clanData.get("candidates"):
-		data.append({
+		newdata = {
 			"uid": entry["uid"],
 			"nickname": entry["nick"],
 			"timestamp": entry["date"],
-			"comment": entry["comments"],
-			"ip": entry["ip"]
-		})
+			"comment": entry["comments"]
+		}
+
+		geodata = lookup_city(entry["ip"])
+		if geodata:
+			newdata["geodata"] = {
+				"country": geodata.country.iso_code,
+				"timezone": lookup_utc_offset(geodata.location.time_zone),
+				"city": geodata.city.name
+			}
+		data.append(newdata)
 	return data
 @router.post(
 	"/accept/{userId}",
@@ -120,7 +135,7 @@ async def reject_applicant(
 		raise HTTPException(403, "User is not part of a squadron")
 	return await Request.send_template(
 		user, 
-		"clan_accept_membership_request",
+		"clan_reject_membership_request",
 		userId = userId,
 		_id = squadronId,
 		comments = message

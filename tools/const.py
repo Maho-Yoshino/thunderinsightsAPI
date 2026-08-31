@@ -144,6 +144,10 @@ class GaijinErrorCodes(Enum): # TODO: Finish documenting gaijin error codes
 		"code": status.HTTP_404_NOT_FOUND,
 		"detail": "Searched clan doesn't exist"
 	}
+	CLAN_ALREADY_HAS_CLAN = {
+		"code": status.HTTP_409_CONFLICT,
+		"detail": "User is already in a squadron"
+	}
 	@staticmethod
 	def parse(response: bytes) -> None:
 		"""Parse a Gaijin error code string into a properly formatted `HTTPException`. Returns early if error is not found or not given"""

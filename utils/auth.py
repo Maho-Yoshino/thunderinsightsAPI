@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dotenv import set_key
 from re import sub as re_sub, search as re_search
 from logging import getLogger
 from asyncio import sleep
@@ -19,6 +20,7 @@ from jwt import decode as jwt_decode
 from dataclasses import dataclass, asdict, field
 from base64 import b64encode
 from hashlib import md5
+from cryptography.fernet import Fernet
 
 from utils.helper import dtToTimestamp, AuthenticationError
 from utils.network import NetworkManager
@@ -51,22 +53,23 @@ class jwtData:
 	uid: int
 	extras: dict[str, Any]
 
-def jwt_get_data(jwt:str) -> jwtData:
-	data = jwt_decode(jwt, options={"verify_signature": False})
-	return jwtData(
-		data["auth"],
-		data["cntry"],
-		datetime.fromtimestamp(data["exp"], UTC),
-		data["fac"],
-		datetime.fromtimestamp(data["iat"], UTC),
-		data["lng"],
-		data["loc"],
-		data["nick"],
-		data["slt"],
-		tuple(data["tgs"].split(",")),
-		data["uid"],
-		extras={k:v for k, v in data.items() if k not in ["auth","cntry","exp","fac","iat","lng","loc","nick","slt","tgs","uid"]}
-	)
+	@classmethod
+	def from_jwt(cls, jwt:str) -> jwtData:
+		data = jwt_decode(jwt, options={"verify_signature": False})
+		return cls(
+			data["auth"],
+			data["cntry"],
+			datetime.fromtimestamp(data["exp"], UTC),
+			data["fac"],
+			datetime.fromtimestamp(data["iat"], UTC),
+			data["lng"],
+			data["loc"],
+			data["nick"],
+			data["slt"],
+			tuple(data["tgs"].split(",")),
+			data["uid"],
+			extras={k:v for k, v in data.items() if k not in ["auth","cntry","exp","fac","iat","lng","loc","nick","slt","tgs","uid"]}
+		)
 # region User Tokens Cache and refresh
 
 @dataclass(frozen=True, slots=True)
@@ -164,13 +167,13 @@ class UserTokenCache:
 		@classmethod
 		async def from_row(cls, parent:"UserTokenCache", row:Row):
 			t = dbSchema.tokens
-			jwt = str(row[t.JWT])
+			jwt = parent._dec(str(row[t.JWT]))
 			sid = cls.sid_entry.from_row(row)
 			self = cls(
 				hashed = str(row[t.HASH]),
 				jwt=jwt,
-				jwt_expires = jwt_get_data(jwt).exp,
-				user_token = str(row[t.USER_TOKEN]),
+				jwt_expires = jwtData.from_jwt(jwt).exp,
+				user_token = parent._dec(str(row[t.USER_TOKEN])),
 				last_used = datetime.fromtimestamp(int(row[t.LAST_USED]), UTC),
 				requests_count = int(row[t.REQUESTS_CNT]),
 				uidHint = int(row[t.UID]),
@@ -186,7 +189,7 @@ class UserTokenCache:
 			if datetime.now(UTC) > self.jwt_expires:
 				raise AuthenticationError(status.HTTP_401_UNAUTHORIZED, "Login expired. Please reauthenticate.")
 
-			async with self._parent.__networkManager.operation() as session:
+			async with self._parent._networkManager.operation() as session:
 				async with session.post(
 					"https://auth.gaijinent.com/login_token.php", 
 					data={"token": self.user_token}, 
@@ -195,7 +198,7 @@ class UserTokenCache:
 						"Content-Type": "application/x-www-form-urlencoded"
 					}
 				) as r:
-					content = await self._parent.__networkManager.handle_response(r)
+					content = await self._parent._networkManager.handle_response(r)
 
 			if content.get("status") == "LOGINERROR":
 				if content.get("error") == "Wrong token":
@@ -205,7 +208,7 @@ class UserTokenCache:
 
 			if self.jwt != content["jwt"]:
 				self.jwt = content["jwt"]
-				self.jwt_expires = jwt_get_data(self.jwt).exp
+				self.jwt_expires = jwtData.from_jwt(self.jwt).exp
 			await self._write_values()
 
 		def timeLeft(self) -> timedelta:
@@ -260,7 +263,10 @@ class UserTokenCache:
 					continue
 				elif isinstance(value, datetime):
 					value = dtToTimestamp(value)
-				changed[key] = value
+				if key in [dbSchema.tokens.JWT, dbSchema.tokens.USER_TOKEN]:
+					changed[key] = self._parent._enc(value)
+				else:
+					changed[key] = value
 
 			async with self._parent._transaction() as cur:
 				if changed:
@@ -310,14 +316,20 @@ class UserTokenCache:
 	__autorefresh_job:Job = None
 	__db_path:Path = None
 	_pending_2fa:dict[str, dict[str, int|str|list[str]]] # email -> {requestId, userId, types, code (after answering)}
-	__networkManager:NetworkManager
+	_networkManager:NetworkManager
 
 	def __init__(self, networkManager:NetworkManager):
-		self.__networkManager = networkManager
+		self._networkManager = networkManager
 		self.scheduler = AsyncIOScheduler()
 
 		self._pending_2fa = {}
 		self.__db_path = Path(__file__).parent / "users.db"
+		key = getenv("TOKEN_ENC_KEY")
+		if not key:
+			_logger.warning("No 'TOKEN_ENC_KEY' env variable found, autogenerating a key")
+			key = Fernet.generate_key().decode("utf-8")
+			set_key(".env", "TOKEN_ENC_KEY", key)
+		self.__fernet = Fernet(key.encode())
 
 		_logger.debug("User Token Cache initialized")
 
@@ -335,7 +347,7 @@ class UserTokenCache:
 			"client": client_id
 		}
 		
-		async with self.__networkManager.operation() as session:
+		async with self._networkManager.operation() as session:
 			#region Auth flow
 			async with session.post(
 				"https://auth.gaijinent.com/login.php", 
@@ -345,7 +357,7 @@ class UserTokenCache:
 					"User-Agent": "ThunderAPI/1.0"
 				}
 			) as r:
-				data = await self.__networkManager.handle_response(r)
+				data = await self._networkManager.handle_response(r)
 
 			if data["status"] == "2STEP":
 				two_factor_types = set()
@@ -365,7 +377,7 @@ class UserTokenCache:
 					async with session.get(f"https://auth.gaijinent.com/api/auth/requestTwoStep?requestId={data['requestId']}&userId={data['userId']}", timeout=60) as r:
 						if "GaijinPass" in two_factor_types:
 							try:
-								data = await self.__networkManager.handle_response(r)
+								data = await self._networkManager.handle_response(r)
 								success = True
 							except AuthenticationError:
 								async with session.post(
@@ -376,7 +388,7 @@ class UserTokenCache:
 										"User-Agent": "ThunderAPI/1.0"
 									}
 								) as r:
-									data = await self.__networkManager.handle_response(r)
+									data = await self._networkManager.handle_response(r)
 								tries += 1
 								continue
 						else: # UNTESTED PATH
@@ -391,7 +403,7 @@ class UserTokenCache:
 							success = True
 
 				if not success:
-					raise AuthenticationError(status.HTTP_403_FORBIDDEN, "Could not get 2FA login in time")
+					raise AuthenticationError(status.HTTP_408_REQUEST_TIMEOUT, "Could not get 2FA login in time")
 
 				async with session.post(
 					"https://auth.gaijinent.com/login.php",
@@ -408,7 +420,7 @@ class UserTokenCache:
 						"User-Agent": "ThunderAPI/1.0"
 					}
 				) as r:
-					data = await self.__networkManager.handle_response(r)
+					data = await self._networkManager.handle_response(r)
 
 				if data["status"] == "2STEPERROR":
 					self._pending_2fa.pop(email, None)
@@ -421,7 +433,7 @@ class UserTokenCache:
 		async with self._transaction() as cur:
 			schema = dbSchema
 			raw, hash = self._generate_hash()
-			jwt_decoded = jwt_get_data(data["jwt"])
+			jwt_decoded = jwtData.from_jwt(data["jwt"])
 			if await (await cur.execute(f"SELECT 1 FROM {schema.tokens.t()} WHERE {schema.tokens.EMAIL} = ?", (email,))).fetchone() is not None:
 				_logger.debug(f"Overwriting old loginentry for {email}")
 				await cur.execute(f"""
@@ -435,14 +447,14 @@ class UserTokenCache:
 						{schema.tokens.LAST_USED} = ?
 					WHERE {schema.tokens.EMAIL} = ?;
 					""", 
-					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], 0, email)
+					(hash, self._enc(data["jwt"]), dtToTimestamp(jwt_decoded.exp), self._enc(data["token"]), data["user_id"], 0, email)
 				)
 			else:
 				await cur.execute(f"""
 					INSERT INTO {schema.tokens.t()} 
 					({schema.tokens.HASH}, {schema.tokens.JWT}, {schema.tokens.JWT_EXPIRES}, {schema.tokens.USER_TOKEN}, {schema.tokens.UID}, {schema.tokens.EMAIL}, {schema.tokens.LAST_USED}) 
 					VALUES ({', '.join(["?" for i in range(7)])})""", 
-					(hash, data["jwt"], dtToTimestamp(jwt_decoded.exp), data["token"], data["user_id"], email, 0)
+					(hash, self._enc(data["jwt"]), dtToTimestamp(jwt_decoded.exp), self._enc(data["token"]), data["user_id"], email, 0)
 				)		
 		return raw
 
@@ -455,7 +467,7 @@ class UserTokenCache:
 					row[dbSchema.sso_sessions.SID],
 					datetime.fromtimestamp(row[dbSchema.sso_sessions.SID_EXP])
 				)
-		async with self.__networkManager.operation() as session:
+		async with self._networkManager.operation() as session:
 			async with session.get("https://warthunder.com/") as response:
 				await response.read()
 				cookies = response.history[0].cookies
@@ -558,8 +570,8 @@ class UserTokenCache:
 	async def remove_entry(self, entry: Entry) -> bool:
 		async with self._transaction() as cur:
 			await cur.execute(f"DELETE FROM {dbSchema.sso_sessions.t()} WHERE {dbSchema.sso_sessions.EMAIL} = ?", (entry.email,))
-			await cur.execute(f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.USER_TOKEN} = ?", (entry.user_token,))
-			return await (await cur.execute(f"SELECT 1 FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.USER_TOKEN} = ?", (entry.user_token,))).fetchone() is None
+			await cur.execute(f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.HASH} = ?", (entry.hashed,))
+			return await (await cur.execute(f"SELECT 1 FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.HASH} = ?", (entry.hashed,))).fetchone() is None
 	# region Helpers
 	async def _refresh(self):
 		self._pending_2fa = {k:v for k,v in self._pending_2fa.items() if v["expires"] > round(datetime.now(UTC).timestamp(), 0)}
@@ -587,6 +599,11 @@ class UserTokenCache:
 		return raw_token, sha256(raw_token.encode()).hexdigest()
 	def _hash_token(self, raw_token:str) -> str:
 		return sha256(raw_token.encode()).hexdigest()
+	
+	def _enc(self, value:str) -> str:
+		return self.__fernet.encrypt(value.encode()).decode()
+	def _dec(self, value: str) -> str:
+		return self.__fernet.decrypt(value.encode()).decode()
 
 	@asynccontextmanager
 	async def _transaction(self):
@@ -625,10 +642,11 @@ class UserTokenCache:
 	@staticmethod
 	async def _init_db(dbPath:Path):
 		if dbPath.exists():
+			dbPath.chmod(mode=0o600)
 			return
 
 		init_script = dbPath.parent / (".".join(dbPath.name.split(".")[:-1]) + "_create.sql")
-		dbPath.touch()
+		dbPath.touch(mode=0o600)
 
 		try:
 			async with connect(dbPath) as con:
