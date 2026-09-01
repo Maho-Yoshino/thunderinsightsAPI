@@ -60,7 +60,7 @@ async def update_db():
                 if asset.name != "GeoLite2-City.mmdb":
                     continue
                 with _lock:
-                    await to_thread(asset.download_asset(_db_tmp))
+                    await to_thread(lambda: asset.download_asset(_db_tmp))
                     file_replace(_db_tmp, _db)
                     _db_id.write_text(str(latest.id))
                     if _reader is not None:

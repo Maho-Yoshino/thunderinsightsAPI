@@ -91,6 +91,8 @@ async def lifespan(app: FastAPI):
 		await users_cache.close()
 		await networkManager.close()
 
+
+debug = int(getenv("DEBUG_MODE", "0")) == 1
 app = FastAPI(
 	title="ThunderAPI",
 	description="API to retrieve War Thunder data.",
@@ -101,7 +103,11 @@ app = FastAPI(
 	docs_url=None,
 	responses={
 		status.HTTP_401_UNAUTHORIZED: {"description": "User token was not found, user is not authenticated or login expired"}
-	}
+	},
+	contact={
+		"discord": "https://discord.gg/wsn9Wcqqym",
+	},
+	debug=debug
 )
 
 #region Rate Limiter
@@ -204,8 +210,6 @@ def privacy_policy():
 #endregion
 
 def main():
-
-	debug = int(getenv("DEBUG_MODE", "0")) == 1
 	# region Logging
 	def log_namer(default_name:str):
 		dirname = path.dirname(default_name)

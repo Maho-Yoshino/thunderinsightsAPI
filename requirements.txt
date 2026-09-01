@@ -3,7 +3,7 @@ orjson
 
 # API Backend
 slowapi
-fastapi
+fastapi==0.136.1
 uvicorn
 apscheduler
 requests
