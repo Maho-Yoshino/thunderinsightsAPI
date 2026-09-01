@@ -17,6 +17,7 @@ pandas
 PyJWT[crypto]
 pydantic[email]
 cryptography
+geoip2
 
 # Async
 aiosqlite

@@ -55,7 +55,7 @@ def _find_binblk() -> Path:
 		p = Path(explicit_path)
 		if p.is_file():
 			return p
-		raise LookupError(f'[-] binBlk not found at: {explicit_path}')
+		raise LookupError(f'binBlk not found at: {explicit_path}')
 
 	# Check tools/ directory next to this script
 	script_dir = Path(__file__).resolve().parent
@@ -73,8 +73,8 @@ def _find_binblk() -> Path:
 		return Path(system_bin)
 
 	raise LookupError(
-		'[-] Missing binBlk. Place it in the tools/ directory or install it system-wide.\n'
-		'    Source: https://github.com/Warthunder-Open-Source-Foundation/wt_ext_cli/releases'
+		'Missing dependency: Install binBlk from\n'
+		'https://github.com/GaijinEntertainment/DagorEngine/releases/latest'
 	)
 
 wt_ext_cli: Path = _find_wtextcli()
