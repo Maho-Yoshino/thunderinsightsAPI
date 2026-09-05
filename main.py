@@ -258,7 +258,7 @@ def main():
 		port = int(getenv("PORT", "8001"))
 	except ValueError:
 		raise EnvironmentError("Environment variable \"PORT\" is not a valid integer")
-	if 1 <= port <= 65535:
+	if not 1 <= port <= 65535:
 		raise EnvironmentError("Invalid port number provided")
 	host = getenv("HOST", "127.0.0.1")
 	logger.info(f"Starting up on {host}:{port}")
