@@ -5,7 +5,7 @@ from dataclasses import dataclass, asdict
 from tools import Request
 from utils.auth import UserTokenCache
 from utils import networkManager
-from api.shared import IntString
+from api.v1.shared import IntString
 
 async def get_asset_class(user: UserTokenCache.Entry, hash:str) -> list[dict[str, str|IntString]]:
 	return await Request.send_template(

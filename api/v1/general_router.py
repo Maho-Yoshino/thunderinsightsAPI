@@ -5,8 +5,9 @@ from fastapi import APIRouter, Query, Request, WebSocket, status
 
 from utils import newsManager
 from utils.news import NewsEntry
-from api.backends.general import getLatestGameVer
-from api.shared import IpString, limiter, TokenBearer
+from api.shared import limiter
+from api.v1.shared import TokenBearer, IpString
+from api.v1.backends.general import getLatestGameVer
 
 
 router = APIRouter(

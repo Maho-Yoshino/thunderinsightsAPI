@@ -1,6 +1,6 @@
 from tools import Request
 from utils.auth import UserTokenCache
-from api.models.users import TerseReturnModel
+from api.v1.models.users import TerseReturnModel
 
 async def get_terse(user:UserTokenCache.Entry, *userIds:int|str) -> dict[str, TerseReturnModel]:
 	return await Request.send_template(

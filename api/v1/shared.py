@@ -1,14 +1,11 @@
-from os import getenv
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from slowapi import Limiter
 from utils import users_cache
 from utils.auth import UserTokenCache
 from typing_extensions import Annotated
 from pydantic import StringConstraints, Field
 from datetime import datetime, UTC
 
-limiter = Limiter(key_func=lambda request: request.client.host, default_limits=[getenv("REGULAR_RATE_LIMIT", "30/minute")])
 security = HTTPBearer(description="Get the token from `POST /v1/login`")
 
 async def get_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):

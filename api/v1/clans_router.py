@@ -5,10 +5,11 @@ from fastapi.responses import JSONResponse
 
 from tools import Request
 from utils.geo import lookup_city, lookup_utc_offset
-from api.shared import limiter, TokenBearer
-from api.models.clans import LogsModel, ClanModel, Roles, ApplicantModel, RolesDisplay, Actions, ClanPositionModel
-from api.models.base import SuccessEmptyDict
-from api.backends.clans import getClan, searchClan
+from api.shared import limiter
+from api.v1.shared import TokenBearer
+from api.v1.models.clans import LogsModel, ClanModel, Roles, ApplicantModel, RolesDisplay, Actions, ClanPositionModel
+from api.v1.models.base import SuccessEmptyDict
+from api.v1.backends.clans import getClan, searchClan
 
 
 squadronId = Annotated[int, Path(title="The squadron's ID", gt=0)]

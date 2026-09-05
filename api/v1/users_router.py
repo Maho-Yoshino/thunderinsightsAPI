@@ -5,9 +5,10 @@ from fastapi.responses import JSONResponse
 from urllib.parse import unquote
 
 from tools import Request
-from api.models.users import TerseReturnModel, getUserDirectModel
-from api.shared import limiter, TokenBearer
-from api.backends.users import get_terse
+from api.shared import limiter
+from api.v1.shared import TokenBearer
+from api.v1.models.users import TerseReturnModel, getUserDirectModel
+from api.v1.backends.users import get_terse
 
 
 router = APIRouter(

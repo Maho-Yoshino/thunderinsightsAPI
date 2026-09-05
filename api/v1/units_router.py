@@ -3,9 +3,9 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, Path, Request, status
 
 from utils import vehicle_cache
+from api.shared import limiter
+from api.v1.shared import TokenBearer
 #from api.models.units import # Currently no models have been implemented
-from api.shared import limiter, TokenBearer
-
 
 router = APIRouter(
 	tags=["units"],

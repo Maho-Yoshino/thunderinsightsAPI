@@ -6,8 +6,9 @@ from pydantic import EmailStr
 
 from utils import users_cache
 from utils.helper import dtToTimestamp
-from api.models.auth import Login, LoginToken
-from api.shared import limiter, TokenBearer
+from api.shared import limiter
+from api.v1.shared import TokenBearer
+from api.v1.models.auth import Login, LoginToken
 
 router = APIRouter(
 	tags=["authentication"],

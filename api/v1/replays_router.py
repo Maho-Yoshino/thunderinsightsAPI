@@ -3,10 +3,10 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, Path, Request as faRequest, Query, status
 
 from utils.replayParser import Replay
-from api.backends.replay import search_replay, ReplayType, ReplayMode, ReplayTechType
-from api.models.replay import SearchModel, DataModel, ReplayNotFoundModel
-from api.shared import limiter, TokenBearer
-
+from api.shared import limiter
+from api.v1.shared import TokenBearer
+from api.v1.backends.replay import search_replay, ReplayType, ReplayMode, ReplayTechType
+from api.v1.models.replay import SearchModel, DataModel, ReplayNotFoundModel
 
 router = APIRouter(
 	prefix="/replay",
