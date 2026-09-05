@@ -186,6 +186,7 @@ class UserTokenCache:
 			return self
 
 		async def refresh(self):
+			_logger.debug(f"Refreshing entry for {self.email}")
 			if datetime.now(UTC) > self.jwt_expires:
 				raise AuthenticationError(status.HTTP_401_UNAUTHORIZED, "Login expired. Please reauthenticate.")
 
@@ -571,7 +572,11 @@ class UserTokenCache:
 		async with self._transaction() as cur:
 			await cur.execute(f"DELETE FROM {dbSchema.sso_sessions.t()} WHERE {dbSchema.sso_sessions.EMAIL} = ?", (entry.email,))
 			await cur.execute(f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.HASH} = ?", (entry.hashed,))
-			return await (await cur.execute(f"SELECT 1 FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.HASH} = ?", (entry.hashed,))).fetchone() is None
+			if await (await cur.execute(f"SELECT 1 FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.HASH} = ?", (entry.hashed,))).fetchone() is None:
+				_logger.debug(f"Removed entry {entry.email}")
+				return True
+		_logger.debug(f"Failed to remove entry {entry.email}")
+		return False
 	# region Helpers
 	async def _refresh(self):
 		self._pending_2fa = {k:v for k,v in self._pending_2fa.items() if v["expires"] > round(datetime.now(UTC).timestamp(), 0)}
@@ -584,11 +589,7 @@ class UserTokenCache:
 					if entry.usedWithin(30):
 						await entry.refresh()
 				except AuthenticationError:
-					await cur.execute(
-						f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.HASH} = ?", 
-						(entry.hashed,)
-					)
-					_logger.info(f"Removed expired entry for {entry.email}")
+					await self.remove_entry(entry)
 
 			operation = await cur.execute(f"DELETE FROM {dbSchema.tokens.t()} WHERE {dbSchema.tokens.JWT_EXPIRES} <= strftime('%s', 'now')")
 			if operation.rowcount > 0:

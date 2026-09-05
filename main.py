@@ -31,9 +31,10 @@ asyncio.set_event_loop(loop)
 
 from utils import users_cache, networkManager, newsManager
 from utils.geo import update_db
-from api.v1 import users_router, auth_router, clans_router, general_router, marketplace_router, replays_router, units_router
-from api.v1.shared import limiter
+from api.v1 import router as v1Router
+from api.shared import limiter
 
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
@@ -122,13 +123,7 @@ app.add_exception_handler(
 #endregion
 
 #region Add routers
-app.include_router(auth_router.router, prefix="/v1")
-app.include_router(clans_router.router, prefix="/v1")
-app.include_router(general_router.router, prefix="/v1")
-#app.include_router(units_router.router, prefix="/v1")
-app.include_router(users_router.router, prefix="/v1")
-app.include_router(replays_router.router, prefix="/v1")
-app.include_router(marketplace_router.router, prefix="/v1")
+app.include_router(v1Router)
 #endregion
 
 #region Modify OpenAPI schema
@@ -211,27 +206,71 @@ def privacy_policy():
 
 def main():
 	# region Logging
+
+	logFolder = Path(__file__).parent / "logs"
+	logFolder.mkdir(mode=0o755, exist_ok=True)
+
+	#region Handler and Formatter
 	def log_namer(default_name:str):
 		dirname = path.dirname(default_name)
 		filename = path.basename(default_name)
 		_, _, date = filename.rpartition(".")
 		return path.join(dirname, f"{date}.log")
-
-	logFolder = Path(__file__).parent / "logs"
-	logFolder.mkdir(mode=0o755, exist_ok=True)
-
 	handler = TimedRotatingFileHandler(logFolder / "latest.log", when="midnight", interval=1, utc=True, backupCount=5)
 	handler.suffix = "%Y-%m-%d"
 	formatter = logging.Formatter(f"%(asctime)s:%(name)-30s:%(funcName)-15s:%(lineno)-3d:%(levelname)-7s:%(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 	handler.setFormatter(formatter)
 	handler.namer = log_namer
 	logger.addHandler(handler)
-	logger.setLevel(logging.DEBUG if debug else logging.INFO)
+	logger.propagate = False
+	#endregion
+
+	#region Log level
+	loglevel = getenv("LOG_LEVEL", "INFO")
+	match loglevel.upper().strip():
+		case "DEBUG":
+			level = logging.DEBUG
+		case "INFO":
+			level = logging.INFO
+		case "WARN", "WARNING":
+			level = logging.WARNING
+		case "ERROR":
+			level = logging.ERROR
+		case "FATAL", "CRITICAL":
+			level = logging.CRITICAL
+		case _:
+			logger.warning("Invalid logging level enterred, defaulting to 'INFO'")
+			level = logging.INFO
+	logger.setLevel(level)
+	#endregion
+	#region Replace uvicorn logger
+	for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+		uvicorn_logger = logging.getLogger(name)
+
+		uvicorn_logger.handlers.clear()
+
+		uvicorn_logger.setLevel(logging.INFO)
+		uvicorn_logger.propagate = True
+	#endregion
 	# endregion
 
-	logger.info("Starting up")
 	try:
-		uvicorn_run(app, host=getenv("HOST", "127.0.0.1"), port=int(getenv("PORT", "8001")))
+		port = int(getenv("PORT", "8001"))
+	except ValueError:
+		raise EnvironmentError("Environment variable \"PORT\" is not a valid integer")
+	if ( 
+		port != 443 and 
+		port != 80 and
+		(
+			port > 49151 or
+			port < 1024
+		)
+	):
+		raise EnvironmentError("Invalid port number provided")
+	host = getenv("HOST", "127.0.0.1")
+	logger.info(f"Starting up on {host}:{port}")
+	try:
+		uvicorn_run(app, host=host, port=port)
 	except Exception:
 		logger.exception("An uncaught error occurred during runtime")
 	finally:

@@ -1,4 +1,3 @@
 users.db
 news.json
-GeoLite2-City.mmdb
-GeoLite2-City.hash
+GeoLite2-City.*
