@@ -31,8 +31,8 @@ asyncio.set_event_loop(loop)
 
 from utils import users_cache, networkManager, newsManager
 from utils.geo import update_db
-from api import users_router, clans_router, general_router, auth_router, units_router, replays_router, marketplace_router
-from api.shared import limiter
+from api.v1 import users_router, auth_router, clans_router, general_router, marketplace_router, replays_router, units_router
+from api.v1.shared import limiter
 
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
